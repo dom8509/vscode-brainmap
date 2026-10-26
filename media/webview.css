@@ -1594,6 +1594,16 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "brand end" "main main";
   }
+  /* In its own row the buttons flow as one line, so a wrapped button shares a line with the next ones. */
+  .tb-main {
+    gap: 8px;
+  }
+  .tb-main > .group {
+    display: contents;
+  }
+  .tb-main [data-menu="layout"] {
+    margin-right: 12px;
+  }
 }
 @container app (max-width: 560px) {
   .brand b {
