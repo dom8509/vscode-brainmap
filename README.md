@@ -10,6 +10,9 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 
 - **Start** – an empty graph shows one big **+** in the middle. Click it to create the first node.
 - **Right-click a node** – add a connected node, slice from here, delete.
+- **Connect with node…** (right-click a node, the *Connect…* button or `C`) – type part of
+  another node's name, pick it from the suggestions (↑/↓, Enter) and choose the direction
+  (→ to it, ← from it, ↔ both).
 - **Select two nodes** (Ctrl/Shift+click) and right-click one of them – connect them
   (A → B, B → A or A ↔ B).
 - **Right-click a connection** – make it one-way / two-way, reverse it, delete it.
@@ -32,7 +35,7 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Slices** – saved views of a part of the graph: filter by node type, tag, connection type and/or
   the neighbourhood of start nodes (downstream / upstream / both, max depth). Two-way connections
   are followed in both directions. Nodes outside a slice are hidden or dimmed.
-- **Keys** – `N` new connected node · `Backspace` delete · `F` fit · `L` re-run layout ·
+- **Keys** – `N` new connected node · `C` connect with node · `Backspace` delete · `F` fit · `L` re-run layout ·
   `Esc` deselect · `Ctrl+Z` undo.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.

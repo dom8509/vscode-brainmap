@@ -216,3 +216,113 @@ export function tagEditor(tags: string[], onchange: (tags: string[]) => void, li
   render();
   return wrap;
 }
+
+export interface PickOption {
+  id: string;
+  label: string;
+  detail?: string;
+}
+
+export type Direction = 'out' | 'in' | 'both';
+
+/**
+ * Small search box with suggestions to pick a node by name.
+ * Arrow keys move through the list, Enter picks, Esc cancels.
+ */
+export function pickNode(
+  at: Position,
+  from: string,
+  options: PickOption[],
+): Promise<{ id: string; direction: Direction } | undefined> {
+  return new Promise((resolve) => {
+    let direction: Direction = 'out';
+    let active = 0;
+    let matches: PickOption[] = [];
+
+    const done = (result?: { id: string; direction: Direction }) => {
+      box.remove();
+      window.removeEventListener('mousedown', outside, true);
+      resolve(result);
+    };
+    const outside = (e: Event) => {
+      if (!box.contains(e.target as Node)) done();
+    };
+
+    const input = h('input', { class: 'picker-input', placeholder: 'Type a node name…', autocomplete: 'off', spellcheck: false });
+    const list = h('div', { class: 'picker-list', role: 'listbox' });
+    const dirButtons = (['out', 'in', 'both'] as Direction[]).map((d) =>
+      h('button', {
+        title: d === 'out' ? `${from} → other` : d === 'in' ? `other → ${from}` : 'Both ways',
+        onclick: () => {
+          direction = d;
+          dirButtons.forEach((b, i) => b.classList.toggle('active', ['out', 'in', 'both'][i] === d));
+          input.focus();
+        },
+      }, d === 'out' ? '→' : d === 'in' ? '←' : '↔'),
+    );
+    dirButtons[0].classList.add('active');
+
+    const render = () => {
+      const q = input.value.trim().toLowerCase();
+      // Names that start with the query come first, then names that contain it.
+      const score = (o: PickOption) => {
+        const l = o.label.toLowerCase();
+        if (!q) return 1;
+        if (l.startsWith(q)) return 0;
+        if (l.includes(q) || o.id.toLowerCase().includes(q)) return 1;
+        return -1;
+      };
+      matches = options
+        .map((o) => ({ o, s: score(o) }))
+        .filter((x) => x.s >= 0)
+        .sort((a, b) => a.s - b.s || a.o.label.localeCompare(b.o.label))
+        .slice(0, 50)
+        .map((x) => x.o);
+      active = Math.min(active, Math.max(0, matches.length - 1));
+      list.replaceChildren(
+        ...(matches.length
+          ? matches.map((o, i) =>
+              h('div', {
+                class: i === active ? 'picker-item active' : 'picker-item',
+                role: 'option',
+                onmousedown: (e: Event) => {
+                  e.preventDefault();
+                  done({ id: o.id, direction });
+                },
+              }, h('span', {}, o.label), o.detail && h('span', { class: 'hint' }, o.detail)),
+            )
+          : [h('div', { class: 'picker-empty' }, 'No matching node')]),
+      );
+      list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+    };
+
+    input.addEventListener('input', () => {
+      active = 0;
+      render();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') active = Math.min(active + 1, matches.length - 1);
+      else if (e.key === 'ArrowUp') active = Math.max(active - 1, 0);
+      else if (e.key === 'Enter') {
+        if (matches[active]) done({ id: matches[active].id, direction });
+      } else if (e.key === 'Escape') done();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+      render();
+    });
+
+    const box = h('div', { class: 'picker' },
+      h('div', { class: 'picker-head' }, h('span', { class: 'title' }, `Connect "${from}" with`), h('div', { class: 'segmented small' }, dirButtons)),
+      input,
+      list,
+    );
+    document.body.append(box);
+    render();
+    const { width, height } = box.getBoundingClientRect();
+    box.style.left = `${Math.max(4, Math.min(at.x, window.innerWidth - width - 4))}px`;
+    box.style.top = `${Math.max(4, Math.min(at.y, window.innerHeight - height - 4))}px`;
+    window.addEventListener('mousedown', outside, true);
+    input.focus();
+  });
+}

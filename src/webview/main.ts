@@ -18,7 +18,7 @@ import {
 import { HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { checklist, datalist, field, h, select, splitList } from './dom';
-import { ContextMenu, FloatingWindow, MenuItem, confirmDialog, tagEditor } from './overlays';
+import { ContextMenu, FloatingWindow, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
 
 const vscode = acquireVsCodeApi();
 const post = (msg: WebviewMessage) => vscode.postMessage(msg);
@@ -258,6 +258,17 @@ class App {
     };
   }
 
+  /** Lets the user type the name of another node (with suggestions) and connects to it. */
+  private async connectWithPicker(id: string, at: Position) {
+    const options = this.map.nodes
+      .filter((n) => n.id !== id)
+      .map((n) => ({ id: n.id, label: nameOf(n), detail: [n.type, n.label && n.label !== n.id ? n.id : ''].filter(Boolean).join(' · ') }));
+    const picked = await pickNode(at, nameOf(this.node(id)), options);
+    if (!picked) return;
+    if (picked.direction === 'in') this.connect(picked.id, id, true);
+    else this.connect(id, picked.id, picked.direction === 'out');
+  }
+
   private connect(source: string, target: string, directed: boolean) {
     const e = this.makeEdge(source, target, directed);
     this.map.edges.push(e);
@@ -318,7 +329,10 @@ class App {
     const items: MenuItem[] = [];
     if (target.kind === 'node' && target.id) {
       const id = target.id;
-      items.push({ label: '＋ Add connected node', hint: 'N', action: () => this.addConnectedNode(id) });
+      items.push(
+        { label: '＋ Add connected node', hint: 'N', action: () => this.addConnectedNode(id) },
+        { label: 'Connect with node…', hint: 'C', action: () => this.connectWithPicker(id, at) },
+      );
       const selectedNodes = this.selection.filter((s) => this.node(s));
       if (selectedNodes.length === 2 && selectedNodes.includes(id)) {
         const other = selectedNodes.find((s) => s !== id)!;
@@ -386,6 +400,14 @@ class App {
           const ext = this.graph.cy.extent();
           this.addNode({ x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 });
         }
+        break;
+      }
+      case 'c': {
+        const nodes = this.selection.filter((id) => this.node(id));
+        if (nodes.length !== 1) return;
+        const box = this.graph.renderedBox(nodes[0]);
+        const r = this.stage.getBoundingClientRect();
+        this.connectWithPicker(nodes[0], box ? { x: r.x + box.x2 + 12, y: r.y + box.y1 } : { x: r.x + 40, y: r.y + 40 });
         break;
       }
       case 'f':
@@ -488,6 +510,7 @@ class App {
       more,
       h('div', { class: 'row' },
         h('button', { title: 'Add a connected node (N)', onclick: () => this.addConnectedNode(node.id) }, '＋ Connected node'),
+        h('button', { title: 'Connect with an existing node (C)', onclick: (e: MouseEvent) => this.connectWithPicker(node.id, { x: e.clientX, y: e.clientY }) }, 'Connect…'),
         h('button', { class: 'danger', title: 'Delete (Backspace)', onclick: () => this.requestDelete([node.id]) }, 'Delete…'),
       ),
     ];
