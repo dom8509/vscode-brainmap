@@ -37,7 +37,7 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   *Style ▾* (colors per type, tag and connection type) and *Slices ▾* (saved views).
 - **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
-- **View follows the selection** (⚙ → Layout → "Center view on the selected node").
+- **View follows the selection** (Layout ▾ → "Center view on the selected node").
 - **Layouts** – *Physics* (cytoscape-cola, neighbours follow while you drag) and *Hierarchy*
   (dagre, rounded right-angle connections) in the toolbar; more under *More…*.
   Positions are not saved: the layout arranges the graph each time the file opens.
