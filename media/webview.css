@@ -295,13 +295,21 @@ button:disabled {
 }
 
 /* group hulls */
+.hull-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
 .hull {
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.hull-anchor {
   position: absolute;
   left: 0;
   top: 0;
-  box-sizing: border-box;
-  border: 1px dashed;
-  transition: opacity 0.3s ease;
 }
 .hull-label {
   position: absolute;
@@ -312,6 +320,9 @@ button:disabled {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+.hull-anchor.outside .hull-label {
+  top: -16px;
 }
 .hull-layer.lod-low .hull-label {
   top: -30px;

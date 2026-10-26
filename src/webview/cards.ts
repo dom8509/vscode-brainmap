@@ -1,8 +1,12 @@
 import type { Core, NodeSingular } from 'cytoscape';
 import { h } from './dom';
+import { HullPart, Rect, hullParts } from './hulls';
 
 /** Card height in model units. Width comes from the node's `width` data. */
 export const CARD_HEIGHT = 64;
+/** Space around the cards of a group; more on top for the group's name. */
+const HULL_PAD = 24;
+const HULL_TOP = 34;
 /** Below this zoom cards collapse to colored blocks and groups show big names. */
 const LOD_ZOOM = 0.45;
 
@@ -55,13 +59,23 @@ export class CardLayer {
   private cardLayer = h('div', { class: 'card-layer' });
   private minimap = h('canvas', { class: 'minimap', width: 196, height: 120, title: 'Click to move the view' });
   private cards = new Map<string, Card>();
-  private hulls = new Map<string, HTMLElement>();
+  private hullSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  private hullGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  private hulls = new Map<string, { path: SVGPathElement; labels: HTMLElement[] }>();
+  private hullSig = '';
+  private hullShapes = new Map<string, HullPart[]>();
+  private hullAt = 0;
+  private hullCost = 0;
+  private hullTimer = 0;
   private frame = 0;
   private ready = false;
   private editing?: string;
   groups = true;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
+    this.hullSvg.setAttribute('class', 'hull-svg');
+    this.hullSvg.append(this.hullGroup);
+    this.hullLayer.append(this.hullSvg);
     canvas.before(this.hullLayer);
     canvas.after(this.cardLayer);
     overlayParent.append(this.minimap);
@@ -188,48 +202,78 @@ export class CardLayer {
   }
 
   private updateHulls(zoom: number, pan: { x: number; y: number }) {
-    const groups = new Map<string, { color: string; name: string; x1: number; y1: number; x2: number; y2: number; n: number }>();
+    const groups = new Map<string, { color: string; name: string; n: number; boxes: Rect[]; cards: Rect[] }>();
+    const all: { type: string; card: Rect }[] = [];
     if (this.groups) {
       this.cy.nodes().forEach((n) => {
-        const type = n.data('type') as string;
-        if (!type || n.hasClass('hidden')) return;
+        if (n.hasClass('hidden')) return;
         const p = n.position();
         const w = n.data('width') / 2;
-        const g = groups.get(type) ?? { color: n.data('typeColor'), name: n.data('typeName'), x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity, n: 0 };
-        g.x1 = Math.min(g.x1, p.x - w);
-        g.x2 = Math.max(g.x2, p.x + w);
-        g.y1 = Math.min(g.y1, p.y - CARD_HEIGHT / 2);
-        g.y2 = Math.max(g.y2, p.y + CARD_HEIGHT / 2);
+        const card = { x1: p.x - w, y1: p.y - CARD_HEIGHT / 2, x2: p.x + w, y2: p.y + CARD_HEIGHT / 2 };
+        const type = n.data('type') as string;
+        all.push({ type: type ?? '', card });
+        if (!type) return;
+        const g = groups.get(type) ?? { color: n.data('typeColor'), name: n.data('typeName'), n: 0, boxes: [] as Rect[], cards: [] as Rect[] };
+        g.cards.push(card);
+        g.boxes.push({ x1: card.x1 - HULL_PAD, y1: card.y1 - HULL_TOP, x2: card.x2 + HULL_PAD, y2: card.y2 + HULL_PAD });
         g.n++;
         groups.set(type, g);
       });
     }
-    for (const [type, g] of groups) {
-      let el = this.hulls.get(type);
-      if (!el) {
-        el = h('div', { class: 'hull' }, h('span', { class: 'hull-label' }));
-        this.hullLayer.append(el);
-        this.hulls.set(type, el);
+    // The shapes only change when cards move; pan and zoom just move the drawing.
+    const sig = all.map((a) => `${a.type}:${Math.round(a.card.x1)},${Math.round(a.card.y1)},${Math.round(a.card.x2)}`).join('|');
+    // In big graphs the shapes take a while: while cards keep moving, redo them at most every few frames.
+    const wait = this.hullCost * 4 - (performance.now() - this.hullAt);
+    if (sig !== this.hullSig && wait > 0) {
+      clearTimeout(this.hullTimer);
+      this.hullTimer = window.setTimeout(() => this.schedule(), wait);
+    } else if (sig !== this.hullSig) {
+      const start = performance.now();
+      this.hullSig = sig;
+      this.hullShapes = new Map();
+      for (const [type, g] of groups) {
+        const foreign = all.filter((a) => a.type !== type).map((a) => a.card);
+        this.hullShapes.set(type, hullParts(g.boxes, g.cards, foreign));
       }
-      const pad = 24;
-      const top = 34;
-      const x = (g.x1 - pad) * zoom + pan.x;
-      const y = (g.y1 - top) * zoom + pan.y;
-      Object.assign(el.style, {
-        transform: `translate(${x}px, ${y}px)`,
-        width: `${(g.x2 - g.x1 + pad * 2) * zoom}px`,
-        height: `${(g.y2 - g.y1 + top + pad) * zoom}px`,
-        borderRadius: `${28 * zoom}px`,
-        background: rgba(g.color, 0.06),
-        borderColor: rgba(g.color, 0.32),
-      });
-      const label = el.firstElementChild as HTMLElement;
-      label.textContent = `${g.name} · ${g.n}`;
-      label.style.color = g.color;
+      this.hullAt = performance.now();
+      this.hullCost = this.hullAt - start;
     }
-    for (const [type, el] of this.hulls)
+    this.hullGroup.setAttribute('transform', `translate(${pan.x} ${pan.y}) scale(${zoom})`);
+
+    for (const [type, g] of groups) {
+      const parts = this.hullShapes.get(type) ?? [];
+      let hull = this.hulls.get(type);
+      if (!hull) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('class', 'hull');
+        path.setAttribute('vector-effect', 'non-scaling-stroke');
+        path.setAttribute('fill-rule', 'nonzero');
+        this.hullGroup.append(path);
+        hull = { path, labels: [] };
+        this.hulls.set(type, hull);
+      }
+      hull.path.setAttribute('d', parts.map((p) => p.path).join(''));
+      hull.path.style.fill = rgba(g.color, 0.06);
+      hull.path.style.stroke = rgba(g.color, 0.32);
+      while (hull.labels.length < parts.length) {
+        const anchor = h('div', { class: 'hull-anchor' }, h('span', { class: 'hull-label' }));
+        this.hullLayer.append(anchor);
+        hull.labels.push(anchor);
+      }
+      while (hull.labels.length > parts.length) hull.labels.pop()!.remove();
+      parts.forEach((p, i) => {
+        const anchor = hull!.labels[i];
+        anchor.style.transform = `translate(${p.anchor.x * zoom + pan.x}px, ${p.anchor.y * zoom + pan.y}px)`;
+        anchor.classList.toggle('outside', p.outside);
+        const label = anchor.firstElementChild as HTMLElement;
+        label.textContent = parts.length > 1 ? `${g.name} · ${p.size} of ${g.n}` : `${g.name} · ${g.n}`;
+        label.style.color = g.color;
+      });
+    }
+    for (const [type, hull] of this.hulls)
       if (!groups.has(type)) {
-        el.remove();
+        hull.path.remove();
+        hull.labels.forEach((l) => l.remove());
         this.hulls.delete(type);
       }
   }
