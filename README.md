@@ -11,6 +11,10 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Cards** – every node is a card with an icon (picked from its type name) and its type.
   Tags stay off the card; the hover card and the details show them.
 - **Groups** – soft colored areas around nodes of the same type (`G` or the *Groups* button).
+  While groups are on, the layouts keep each group together where the connections allow it:
+  *Physics* and *fCoSE* start from an arrangement with one area per type, *Hierarchy* puts nodes of a
+  type side by side within a level, *Grid* and *Circle* sort by type. An area hugs its own cards; when a
+  card of another type is in the way, the group is split ("App · 1 of 2").
 - **Focus** – select a node: everything else fades and its connections flow (`F` or *Focus*).
 - **Zoom out** – cards turn into colored blocks and groups show big names. A minimap sits in the corner.
 - **Start** – an empty graph shows a big **+** (or press `Enter`) and three starter templates.

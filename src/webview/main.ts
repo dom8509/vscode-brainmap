@@ -196,6 +196,7 @@ class App {
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
+    this.graph.groupLayout = this.cards.groups;
     this.renderEmpty();
     this.renderHints();
 
@@ -477,8 +478,10 @@ class App {
 
   private toggleGroups() {
     this.cards.groups = !this.cards.groups;
+    this.graph.groupLayout = this.cards.groups;
     this.saveUi({ groups: this.cards.groups });
     this.cards.schedule();
+    this.graph.runLayout(this.map, { fit: false });
     this.renderToolbar();
   }
 
