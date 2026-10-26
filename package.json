@@ -1,0 +1,125 @@
+{
+  "name": "vscode-brainmap",
+  "displayName": "BrainMap Graph Editor",
+  "description": "Create and edit graphs visually in .brainmap files (JSON or YAML) with animated layouts, styling by type/tag and graph slices.",
+  "version": "0.1.0",
+  "publisher": "dom8509",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dom8509/vscode-brainmap.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "graph",
+    "mindmap",
+    "dependency",
+    "diagram",
+    "cytoscape"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "brainmap.graphEditor",
+        "displayName": "BrainMap Graph Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.brainmap"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "languages": [
+      {
+        "id": "brainmap",
+        "aliases": [
+          "BrainMap"
+        ],
+        "extensions": [
+          ".brainmap"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "brainmap.newFile",
+        "title": "BrainMap: New Graph",
+        "category": "BrainMap"
+      },
+      {
+        "command": "brainmap.openAsText",
+        "title": "BrainMap: Open as Text",
+        "category": "BrainMap",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "brainmap.openGraphEditor",
+        "title": "BrainMap: Open Graph Editor",
+        "category": "BrainMap",
+        "icon": "$(type-hierarchy)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "brainmap.openAsText",
+          "when": "activeCustomEditorId == brainmap.graphEditor",
+          "group": "navigation"
+        },
+        {
+          "command": "brainmap.openGraphEditor",
+          "when": "resourceExtname == .brainmap && !activeCustomEditorId",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "BrainMap",
+      "properties": {
+        "brainmap.defaultFormat": {
+          "type": "string",
+          "enum": [
+            "yaml",
+            "json"
+          ],
+          "default": "yaml",
+          "description": "Storage format used for new .brainmap files. Existing files keep their format."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node esbuild.mjs --tests && node --test dist-test/*.js",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.31.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "cytoscape": "^3.34.4",
+    "cytoscape-cola": "^2.5.1",
+    "cytoscape-dagre": "^4.0.1",
+    "cytoscape-edgehandles": "^4.0.1",
+    "cytoscape-fcose": "^2.2.0",
+    "js-yaml": "^4.1.0"
+  }
+}
