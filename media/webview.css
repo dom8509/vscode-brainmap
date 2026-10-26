@@ -1149,6 +1149,35 @@ button:disabled {
   flex-direction: column;
   gap: 4px;
 }
+.slice-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.slice-head a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pop-settings .slice-head button.slice-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bm-muted);
+}
+.pop-settings .slice-head button.slice-icon:hover {
+  background: var(--bm-raised);
+  color: var(--bm-fg);
+}
+.pop-settings .slice-head button.slice-icon.danger:hover {
+  color: var(--bm-danger);
+}
 .slice.active {
   border-color: color-mix(in srgb, var(--bm-accent) 50%, transparent);
   background: color-mix(in srgb, var(--bm-accent) 10%, transparent);

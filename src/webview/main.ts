@@ -87,6 +87,7 @@ const ICON = {
   relayout: '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
   settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   tag: '<path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16"/>',
   connect: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8 16c4 0 4-8 8-8"/>',
@@ -1390,16 +1391,20 @@ class App {
         h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(undefined); } }, 'Full graph')),
       slices.map((s) =>
         h('div', { class: s.name === active ? 'slice active' : 'slice' },
-          h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
-          h('span', { class: 'muted small' }, describeSlice(s)),
-          h('div', { class: 'row' },
-            h('button', { onclick: () => { this.editingSlice = clone(s); (this.editingSlice as any).__orig = s.name; this.renderSettings(); } }, 'Edit'),
-            h('button', { class: 'danger', onclick: () => {
+          h('div', { class: 'slice-head' },
+            h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
+            h('button', { class: 'slice-icon', title: 'Edit slice', 'aria-label': `Edit slice ${s.name}`, onclick: () => {
+              this.editingSlice = clone(s);
+              (this.editingSlice as any).__orig = s.name;
+              this.renderSettings();
+            } }, svgIcon(ICON.pencil, 14)),
+            h('button', { class: 'slice-icon danger', title: 'Delete slice', 'aria-label': `Delete slice ${s.name}`, onclick: () => {
               this.map.settings.slices = slices.filter((x) => x !== s);
               if (active === s.name) this.map.settings.activeSlice = undefined;
               this.commit({ relayout: active === s.name });
-            } }, '✕'),
+            } }, svgIcon(ICON.trash, 14)),
           ),
+          h('span', { class: 'muted small' }, describeSlice(s)),
         ),
       ),
     );
