@@ -18,8 +18,6 @@ cytoscape.use(dagre);
 
 export interface GraphCallbacks {
   onSelect(ids: string[]): void;
-  /** User moved nodes; positions should be persisted. */
-  onPositions(positions: Record<string, Position>): void;
   onBackgroundDoubleClick(pos: Position): void;
   /** Right click on a node, an edge or the background. */
   onContextMenu(target: { kind: 'node' | 'edge' | 'background'; id?: string }, client: Position, pos: Position): void;
@@ -33,7 +31,8 @@ const cssVar = (name: string, fallback: string) =>
 export class GraphView {
   readonly cy: Core;
   private layout?: Layouts;
-  private saveTimer?: number;
+  /** Where nodes that are about to be added should appear. */
+  private pending = new Map<string, Position>();
   private selTimer?: number;
   /** Center the view on the selection (layout setting `followSelection`). */
   follow = true;
@@ -69,8 +68,6 @@ export class GraphView {
 
     // The canvas changes size when the toolbar wraps or the editor is resized.
     new ResizeObserver(() => this.cy.resize()).observe(container);
-
-    this.cy.on('dragfree', 'node', () => this.schedulePositionSave(1200));
 
     this.cy.on('dbltap', (e) => {
       if (e.target === this.cy) this.cb.onBackgroundDoubleClick(e.position);
@@ -178,19 +175,13 @@ export class GraphView {
           type: n.type ?? '',
         };
         const existing = cy.getElementById(n.id);
-        if (existing.nonempty()) {
-          existing.data(data);
-          if (n.position) {
-            const p = existing.position();
-            if (Math.round(p.x) !== Math.round(n.position.x) || Math.round(p.y) !== Math.round(n.position.y))
-              existing.animate({ position: n.position, duration: 300 } as any);
-          }
-        } else {
+        if (existing.nonempty()) existing.data(data);
+        else {
           added.push(n.id);
           toAdd.push({
             group: 'nodes',
             data,
-            position: n.position ?? {
+            position: this.pending.get(n.id) ?? {
               x: center.x + (Math.random() - 0.5) * 200,
               y: center.y + (Math.random() - 0.5) * 200,
             },
@@ -219,6 +210,7 @@ export class GraphView {
         }
       }
       cy.add(toAdd);
+      this.pending.clear();
       this.applySlice(map);
       this.applyHierarchyEdgeVisibility(map);
     });
@@ -262,9 +254,8 @@ export class GraphView {
 
   /**
    * Runs the configured layout over the visible elements.
-   * @param persist save the resulting positions to the file.
    */
-  runLayout(map: BrainMap, opts: { persist?: boolean; fit?: boolean } = {}) {
+  runLayout(map: BrainMap, opts: { fit?: boolean } = {}) {
     this.stopLayout();
     this.cy.resize();
     const l: Required<LayoutSettings> = { ...DEFAULT_LAYOUT, ...map.settings.layout };
@@ -278,6 +269,7 @@ export class GraphView {
     let options: any;
     switch (l.name) {
       case 'force':
+      default:
         options = {
           name: 'cola',
           animate: true,
@@ -345,19 +337,10 @@ export class GraphView {
       case 'grid':
         options = { name: 'grid', ...anim, avoidOverlapPadding: l.nodeSpacing };
         break;
-      case 'preset':
-      default: {
-        const positions = new Map(map.nodes.filter((n) => n.position).map((n) => [n.id, n.position!]));
-        options = { name: 'preset', ...anim, positions: (n: NodeSingular) => positions.get(n.id()) ?? n.position() };
-      }
     }
 
     const layout = eles.layout(options);
     this.layout = layout;
-    if (opts.persist) {
-      if (l.name === 'force' && l.live) this.schedulePositionSave(3000);
-      else layout.one('layoutstop', () => this.schedulePositionSave(50));
-    }
     // With a selection and followSelection, the selection decides the view instead of fitting everything.
     // Read the selection when the layout settles: it may change while the layout runs.
     const settle = () => {
@@ -370,18 +353,9 @@ export class GraphView {
     layout.run();
   }
 
-  private schedulePositionSave(delay: number) {
-    window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => this.cb.onPositions(this.positions()), delay);
-  }
-
-  positions(): Record<string, Position> {
-    const out: Record<string, Position> = {};
-    this.cy.nodes().forEach((n) => {
-      const p = n.position();
-      out[n.id()] = { x: Math.round(p.x), y: Math.round(p.y) };
-    });
-    return out;
+  /** The next sync adds node `id` at `pos` instead of a random spot. */
+  placeAt(id: string, pos: Position) {
+    this.pending.set(id, pos);
   }
 
   select(ids: string[]) {
@@ -402,7 +376,9 @@ export class GraphView {
   renderedBox(id: string) {
     const el = this.cy.getElementById(id);
     if (el.empty() || el.hasClass('hidden')) return undefined;
-    return el.renderedBoundingBox({ includeLabels: false } as any);
+    // For a connection include both end nodes, so a window placed beside it doesn't cover them.
+    const eles = el.isEdge() ? el.union(el.connectedNodes()) : el;
+    return eles.renderedBoundingBox({ includeLabels: false } as any);
   }
 
   /** Puts the model point (x, y) in the middle of the canvas. */

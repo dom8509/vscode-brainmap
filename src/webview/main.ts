@@ -40,7 +40,6 @@ const LAYOUTS: { value: LayoutName; label: string }[] = [
   { value: 'concentric', label: 'Concentric' },
   { value: 'circle', label: 'Circle' },
   { value: 'grid', label: 'Grid' },
-  { value: 'preset', label: 'Manual (saved positions)' },
 ];
 
 const SHAPES: NodeShape[] = ['round-rectangle', 'ellipse', 'rectangle', 'diamond', 'hexagon', 'triangle', 'star'];
@@ -89,10 +88,6 @@ class App {
         this.renderPopup();
         this.renderToolbar();
       },
-      onPositions: (positions) => {
-        for (const n of this.map.nodes) if (positions[n.id]) n.position = positions[n.id];
-        this.save();
-      },
       onBackgroundDoubleClick: (pos) => this.addNode(pos),
       onContextMenu: (target, client, pos) => this.openMenu(target, client, pos),
       onViewport: () => {
@@ -126,17 +121,17 @@ class App {
     this.graph.follow = this.layout.followSelection;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
     this.renderToolbar();
-    const { added } = this.graph.sync(this.map);
+    this.graph.sync(this.map);
     const layoutChanged =
       JSON.stringify(prev.settings.layout) !== JSON.stringify(this.map.settings.layout) ||
       prev.settings.activeSlice !== this.map.settings.activeSlice;
+    const structureChanged = this.structureChanged();
     if (!this.loaded) {
+      // Nothing is stored about positions: the layout arranges the graph on every open.
       this.loaded = true;
-      const allPlaced = this.map.nodes.length > 0 && this.map.nodes.every((n) => n.position);
       if (this.map.nodes.length === 0) this.graph.centerPoint({ x: 0, y: 0 });
-      else if (allPlaced && this.layout.name !== 'force') this.graph.cy.fit(undefined, 40);
       else this.graph.runLayout(this.map);
-    } else if (layoutChanged || (added.length && this.layout.name === 'force' && this.layout.live)) {
+    } else if (layoutChanged || structureChanged) {
       this.graph.runLayout(this.map, { fit: false });
     }
     this.selection = this.selection.filter((id) => this.graph.cy.getElementById(id).nonempty());
@@ -155,15 +150,28 @@ class App {
   /** Applies a model change: re-syncs the graph, re-renders UI and persists. */
   private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean; popup?: boolean } = {}) {
     this.graph.follow = this.layout.followSelection;
-    const { added } = this.graph.sync(this.map);
-    if (opts.relayout || (added.length && this.layout.name === 'force' && this.layout.live))
-      this.graph.runLayout(this.map, { persist: true, fit: opts.fit ?? false });
+    this.graph.sync(this.map);
+    // New or removed nodes/connections re-run the layout so the graph stays arranged.
+    if (this.structureChanged() || opts.relayout) this.graph.runLayout(this.map, { fit: opts.fit ?? false });
     this.renderToolbar();
     if (opts.panel !== false) this.renderPanel();
     if (opts.popup) this.renderPopup();
     else this.placePopup();
     this.renderStatus();
     this.save();
+  }
+
+  private structureKey = '';
+
+  /** True when nodes or connections were added, removed or rewired since the last call. */
+  private structureChanged(): boolean {
+    const key = JSON.stringify([
+      this.map.nodes.map((n) => n.id),
+      this.map.edges.map((e) => [e.source, e.target, e.type ?? '']),
+    ]);
+    const changed = key !== this.structureKey;
+    this.structureKey = key;
+    return changed;
   }
 
   get layout(): Required<LayoutSettings> {
@@ -194,7 +202,8 @@ class App {
 
   /** Creates a node, selects it and puts the cursor into its name field. */
   private addNode(pos: Position, connectFrom?: string) {
-    const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel(), position: pos };
+    const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel() };
+    this.graph.placeAt(node.id, pos);
     const parent = connectFrom ? this.node(connectFrom) : undefined;
     // A connected node inherits the type of its parent – usually what you want in a mind map.
     if (parent?.type) node.type = parent.type;
@@ -346,7 +355,7 @@ class App {
         { label: '＋ Add node here', action: () => this.addNode(pos) },
         'separator',
         { label: 'Fit view', hint: 'F', action: () => this.graph.fit() },
-        { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map, { persist: true }) },
+        { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map) },
       );
     }
     this.menu.show(items, at);
@@ -383,7 +392,7 @@ class App {
         this.graph.fit();
         break;
       case 'l':
-        this.graph.runLayout(this.map, { persist: true });
+        this.graph.runLayout(this.map);
         break;
       case 'Escape':
         this.graph.select([]);
@@ -571,7 +580,7 @@ class App {
             (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
             { title: 'Dependency type that defines the hierarchy' },
           ),
-        h('button', { class: 'icon', title: 'Run layout again (L)', onclick: () => this.graph.runLayout(this.map, { persist: true }) }, '↻'),
+        h('button', { class: 'icon', title: 'Run layout again (L)', onclick: () => this.graph.runLayout(this.map) }, '↻'),
         h('button', { class: 'icon', title: 'Fit everything into view (F)', onclick: () => this.graph.fit() }, '⛶'),
       ),
       h('div', { class: 'group' },
@@ -585,7 +594,6 @@ class App {
       h('div', { class: 'group grow' }, search),
       h('div', { class: 'group' },
         h('button', { class: this.panelOpen ? 'active' : '', title: 'Style, layout and slice settings', onclick: () => { this.panelOpen = !this.panelOpen; this.renderLayoutState(); } }, '⚙ Settings'),
-        h('button', { title: 'Open the file as text', onclick: () => post({ type: 'openText' }) }, '{ }'),
       ),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
@@ -697,12 +705,7 @@ class App {
         h('input', { type: 'checkbox', checked: l.followSelection, onchange: (e: Event) => this.setLayout({ followSelection: (e.target as HTMLInputElement).checked }, false) }),
         'Center view on the selected node'),
       h('div', { class: 'row' },
-        h('button', { onclick: () => this.graph.runLayout(this.map, { persist: true }) }, '↻ Run layout'),
-        h('button', { title: 'Keep the current positions and switch to manual layout', onclick: () => {
-          const pos = this.graph.positions();
-          for (const n of this.map.nodes) n.position = pos[n.id];
-          this.setLayout({ name: 'preset' }, false);
-        } }, '📌 Pin positions'),
+        h('button', { onclick: () => this.graph.runLayout(this.map) }, '↻ Run layout'),
       ),
     );
   }

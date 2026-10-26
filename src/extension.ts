@@ -98,9 +98,6 @@ class BrainMapEditorProvider implements vscode.CustomTextEditorProvider {
           await vscode.workspace.applyEdit(edit);
           break;
         }
-        case 'openText':
-          await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default', vscode.ViewColumn.Beside);
-          break;
         case 'notify':
           if (msg.level === 'error') vscode.window.showErrorMessage(msg.message);
           else vscode.window.showInformationMessage(msg.message);

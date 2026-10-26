@@ -9,5 +9,4 @@ export type HostMessage =
 export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; map: BrainMap }
-  | { type: 'openText' }
   | { type: 'notify'; level: 'info' | 'error'; message: string };

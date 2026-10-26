@@ -13,7 +13,6 @@ export interface BrainNode {
   description?: string;
   /** Overrides the color derived from type/tag styles. */
   color?: string;
-  position?: Position;
   /** Free-form user data, kept untouched. */
   data?: Record<string, unknown>;
 }
@@ -61,8 +60,7 @@ export type LayoutName =
   | 'breadthfirst'
   | 'concentric'
   | 'circle'
-  | 'grid'
-  | 'preset';
+  | 'grid';
 
 export interface LayoutSettings {
   name: LayoutName;
@@ -128,6 +126,8 @@ export interface BrainMap {
 
 export type FileFormat = 'json' | 'yaml';
 
+const LAYOUT_NAMES: LayoutName[] = ['force', 'fcose', 'hierarchy', 'breadthfirst', 'concentric', 'circle', 'grid'];
+
 export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   name: 'force',
   hierarchyEdgeTypes: [],
@@ -173,7 +173,9 @@ export function normalize(raw: unknown): BrainMap {
     const id = String(n.id);
     if (ids.has(id)) continue;
     ids.add(id);
-    nodes.push({ ...n, id, tags: Array.isArray(n.tags) ? n.tags.map(String) : undefined });
+    // Positions are not stored: the layout places nodes freshly each time the file opens.
+    const { position: _p, ...rest } = n;
+    nodes.push({ ...rest, id, tags: Array.isArray(n.tags) ? n.tags.map(String) : undefined });
   }
   const edges: BrainEdge[] = [];
   const edgeIds = new Set<string>();
@@ -190,12 +192,14 @@ export function normalize(raw: unknown): BrainMap {
     edges.push({ ...rest, id, source, target, tags: Array.isArray(e.tags) ? e.tags.map(String) : undefined });
   }
   const settings: Settings = obj.settings && typeof obj.settings === 'object' ? obj.settings : {};
+  const layout = { ...DEFAULT_LAYOUT, ...(settings.layout ?? {}) };
+  if (!LAYOUT_NAMES.includes(layout.name)) layout.name = DEFAULT_LAYOUT.name;
   return {
     version: typeof obj.version === 'number' ? obj.version : 1,
     title: obj.title,
     settings: {
       ...settings,
-      layout: { ...DEFAULT_LAYOUT, ...(settings.layout ?? {}) },
+      layout,
       style: { colorBy: 'type', ...(settings.style ?? {}) },
       slices: Array.isArray(settings.slices) ? settings.slices.filter((s) => s && s.name) : [],
     },

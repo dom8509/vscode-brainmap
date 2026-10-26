@@ -21,7 +21,8 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **View follows the selection** – the selected node moves to the middle of the view
   (switch off in ⚙ Settings → Layout → "Center view on the selected node").
 - **Layouts** – force with live physics (cytoscape-cola), fCoSE, hierarchy (dagre), tree,
-  concentric, circle, grid, manual. With live physics the neighbours follow while you drag a node.
+  concentric, circle, grid. Positions are not saved: the layout arranges the graph each time
+  the file opens. With live physics the neighbours follow while you drag a node.
 - **Hierarchy by dependency type** – pick which connection types (e.g. `depends-on`, `part-of`)
   build the hierarchy. Others are still drawn, or can be hidden.
 - **Proximity** – node spacing, edge length and a preferred length per connection type
@@ -33,7 +34,8 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   are followed in both directions. Nodes outside a slice are hidden or dimmed.
 - **Keys** – `N` new connected node · `Backspace` delete · `F` fit · `L` re-run layout ·
   `Esc` deselect · `Ctrl+Z` undo.
-- `{ }` opens the raw file next to the graph. Changes in either view sync both ways.
+- To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
+  Changes in either view sync both ways.
 
 ## File format
 
@@ -44,7 +46,7 @@ The format is kept when saving. New files use the `brainmap.defaultFormat` setti
 title: Example
 settings:
   layout:
-    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid | preset
+    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid
     hierarchyEdgeTypes: [depends-on]
     direction: TB              # TB | BT | LR | RL
     nodeSpacing: 40
@@ -75,7 +77,6 @@ nodes:
     type: app
     tags: [critical]
     description: Free text
-    position: { x: 0, y: 0 }   # written by the editor
 edges:
   - id: e1
     source: web                # "from"/"to" are accepted too

@@ -13,7 +13,7 @@ export function parse(text: string): BrainMap {
   return normalize(raw);
 }
 
-/** Removes undefined values, empty arrays/objects and rounds positions to keep files tidy. */
+/** Removes undefined values and empty arrays/objects to keep files tidy. */
 function clean(value: unknown, key?: string): unknown {
   if (Array.isArray(value)) return value.map((v) => clean(v));
   if (value && typeof value === 'object') {
@@ -27,7 +27,6 @@ function clean(value: unknown, key?: string): unknown {
     }
     return out;
   }
-  if (typeof value === 'number' && (key === 'x' || key === 'y')) return Math.round(value);
   if (value === '' && key !== 'label') return undefined;
   return value;
 }

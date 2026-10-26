@@ -92,3 +92,10 @@ test('bidirectional edges are followed both ways in slices', () => {
   const s = computeSlice(m, { name: 's', roots: ['a'], direction: 'downstream' });
   assert.deepEqual([...s.nodes].sort(), ['a', 'b']);
 });
+
+test('positions are not kept and the old manual layout falls back to force', () => {
+  const m = normalize({ settings: { layout: { name: 'preset' } }, nodes: [{ id: 'a', position: { x: 1, y: 2 } }] });
+  assert.equal(m.settings.layout?.name, 'force');
+  assert.equal('position' in m.nodes[0], false);
+  assert.ok(!serialize(m, 'yaml').includes('position'));
+});
