@@ -24,7 +24,10 @@ export interface BrainEdge {
   target: string;
   /** Dependency type, e.g. "depends-on", "part-of". */
   type?: string;
+  tags?: string[];
   label?: string;
+  /** false = bidirectional edge (arrows on both ends). Default: directed source → target. */
+  directed?: boolean;
   data?: Record<string, unknown>;
 }
 
@@ -75,6 +78,8 @@ export interface LayoutSettings {
   animate?: boolean;
   /** Hierarchy layout: hide edges whose type is not part of the hierarchy. */
   hideOtherEdges?: boolean;
+  /** Center the view on the selected element(s). */
+  followSelection?: boolean;
 }
 
 export type ColorBy = 'type' | 'tag' | 'none';
@@ -132,6 +137,7 @@ export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   live: true,
   animate: true,
   hideOtherEdges: false,
+  followSelection: true,
 };
 
 export const PALETTE = [
@@ -181,7 +187,7 @@ export function normalize(raw: unknown): BrainMap {
     while (!id || edgeIds.has(id)) id = `e${++counter}`;
     edgeIds.add(id);
     const { from: _f, to: _t, ...rest } = e;
-    edges.push({ ...rest, id, source, target });
+    edges.push({ ...rest, id, source, target, tags: Array.isArray(e.tags) ? e.tags.map(String) : undefined });
   }
   const settings: Settings = obj.settings && typeof obj.settings === 'object' ? obj.settings : {};
   return {
@@ -206,7 +212,10 @@ export function uniqueTypes(map: BrainMap) {
     if (n.type) nodeTypes.add(n.type);
     n.tags?.forEach((t) => tags.add(t));
   }
-  for (const e of map.edges) if (e.type) edgeTypes.add(e.type);
+  for (const e of map.edges) {
+    if (e.type) edgeTypes.add(e.type);
+    e.tags?.forEach((t) => tags.add(t));
+  }
   const style = map.settings.style ?? {};
   Object.keys(style.nodeTypes ?? {}).forEach((t) => nodeTypes.add(t));
   Object.keys(style.edgeTypes ?? {}).forEach((t) => edgeTypes.add(t));
@@ -281,8 +290,9 @@ export function computeSlice(map: BrainMap, slice: Slice): SliceResult {
       out.get(a)!.push(b);
     };
     for (const e of candidateEdges) {
-      if (dir !== 'upstream') add(e.source, e.target);
-      if (dir !== 'downstream') add(e.target, e.source);
+      const both = e.directed === false;
+      if (dir !== 'upstream' || both) add(e.source, e.target);
+      if (dir !== 'downstream' || both) add(e.target, e.source);
     }
     const reached = new Set<string>(roots);
     let frontier = roots;

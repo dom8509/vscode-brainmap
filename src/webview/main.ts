@@ -7,23 +7,33 @@ import {
   LayoutName,
   LayoutSettings,
   NodeShape,
+  Position,
   Slice,
   autoColor,
   emptyMap,
   newId,
+  resolveNodeStyle,
   uniqueTypes,
 } from '../shared/model';
 import { HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { checklist, datalist, field, h, select, splitList } from './dom';
+import { ContextMenu, FloatingWindow, MenuItem, confirmDialog, tagEditor } from './overlays';
 
 const vscode = acquireVsCodeApi();
 const post = (msg: WebviewMessage) => vscode.postMessage(msg);
 
-type Tab = 'inspect' | 'style' | 'layout' | 'slices';
+type Tab = 'style' | 'layout' | 'slices';
+
+interface UiState {
+  tab?: Tab;
+  panelOpen?: boolean;
+  popup?: Position;
+  edgeType?: string;
+}
 
 const LAYOUTS: { value: LayoutName; label: string }[] = [
-  { value: 'force', label: 'Force (physics)' },
+  { value: 'force', label: 'Force – cola (live physics)' },
   { value: 'fcose', label: 'Force (fCoSE)' },
   { value: 'hierarchy', label: 'Hierarchy (by dependency type)' },
   { value: 'breadthfirst', label: 'Tree (breadth-first)' },
@@ -36,45 +46,69 @@ const LAYOUTS: { value: LayoutName; label: string }[] = [
 const SHAPES: NodeShape[] = ['round-rectangle', 'ellipse', 'rectangle', 'diamond', 'hexagon', 'triangle', 'star'];
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
+const nameOf = (n: BrainNode | undefined) => n?.label || n?.id || '?';
 
 class App {
   map: BrainMap = emptyMap();
   format: FileFormat = 'yaml';
   selection: string[] = [];
-  tab: Tab = vscode.getState<{ tab?: Tab }>()?.tab ?? 'inspect';
-  connect = false;
+  ui: UiState = vscode.getState<UiState>() ?? {};
+  tab: Tab = this.ui.tab ?? 'layout';
+  panelOpen = this.ui.panelOpen ?? false;
   loaded = false;
-  newNodeType = '';
-  newEdgeType = '';
+  /** Dependency type used for new edges: the last one the user picked. */
+  edgeType = this.ui.edgeType ?? '';
   editingSlice?: Slice;
 
   private graph: GraphView;
   private toolbar = h('div', { class: 'toolbar' });
   private panel = h('div', { class: 'panel' });
+  private stage = h('div', { class: 'stage' });
   private status = h('div', { class: 'status' });
   private error = h('div', { class: 'error hidden' });
+  private plus = h('button', { class: 'empty-plus hidden', title: 'Create the first node', onclick: () => this.createFirstNode() }, '+');
+  private menu: ContextMenu;
+  private popup: FloatingWindow;
   private postTimer?: number;
+  private placeFrame = 0;
 
   constructor(root: HTMLElement) {
     const canvas = h('div', { class: 'canvas' });
-    root.append(this.toolbar, h('div', { class: 'main' }, h('div', { class: 'stage' }, canvas, this.status, this.error), this.panel));
+    this.stage.append(canvas, this.plus, this.status, this.error);
+    root.append(this.toolbar, h('div', { class: 'main' }, this.stage, this.panel));
+    this.menu = new ContextMenu(document.body);
+    this.popup = new FloatingWindow(
+      this.stage,
+      this.ui.popup,
+      (pos) => this.saveUi({ popup: pos }),
+      () => this.graph.select([]),
+    );
     this.graph = new GraphView(canvas, {
       onSelect: (ids) => {
         this.selection = ids;
-        if (ids.length && this.tab !== 'slices') this.tab = 'inspect';
-        this.renderPanel();
+        this.renderPopup();
+        this.renderToolbar();
       },
       onPositions: (positions) => {
         for (const n of this.map.nodes) if (positions[n.id]) n.position = positions[n.id];
         this.save();
       },
-      onConnect: (source, target) => this.addEdge(source, target),
       onBackgroundDoubleClick: (pos) => this.addNode(pos),
+      onContextMenu: (target, client, pos) => this.openMenu(target, client, pos),
+      onViewport: () => {
+        cancelAnimationFrame(this.placeFrame);
+        this.placeFrame = requestAnimationFrame(() => this.placePopup());
+      },
     });
 
     window.addEventListener('message', (e: MessageEvent<HostMessage>) => this.onMessage(e.data));
     window.addEventListener('keydown', (e) => this.onKey(e));
     post({ type: 'ready' });
+  }
+
+  private saveUi(patch: Partial<UiState>) {
+    this.ui = { ...this.ui, ...patch };
+    vscode.setState(this.ui);
   }
 
   // ---------------------------------------------------------------- messaging
@@ -89,6 +123,7 @@ class App {
     const prev = this.map;
     this.map = msg.map;
     this.format = msg.format;
+    this.graph.follow = this.layout.followSelection;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
     this.renderToolbar();
     const { added } = this.graph.sync(this.map);
@@ -98,13 +133,17 @@ class App {
     if (!this.loaded) {
       this.loaded = true;
       const allPlaced = this.map.nodes.length > 0 && this.map.nodes.every((n) => n.position);
-      if (allPlaced && this.layout.name !== 'force') this.graph.cy.fit(undefined, 40);
+      if (this.map.nodes.length === 0) this.graph.centerPoint({ x: 0, y: 0 });
+      else if (allPlaced && this.layout.name !== 'force') this.graph.cy.fit(undefined, 40);
       else this.graph.runLayout(this.map);
     } else if (layoutChanged || (added.length && this.layout.name === 'force' && this.layout.live)) {
       this.graph.runLayout(this.map, { fit: false });
     }
     this.selection = this.selection.filter((id) => this.graph.cy.getElementById(id).nonempty());
-    this.render();
+    this.renderPanel();
+    this.renderStatus();
+    // Don't rebuild the popup under the user's cursor while they are typing in it.
+    if (!this.popup.el.contains(document.activeElement)) this.renderPopup();
   }
 
   /** Sends the model to the extension host (debounced) which writes it to the file. */
@@ -114,12 +153,15 @@ class App {
   }
 
   /** Applies a model change: re-syncs the graph, re-renders UI and persists. */
-  private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean } = {}) {
+  private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean; popup?: boolean } = {}) {
+    this.graph.follow = this.layout.followSelection;
     const { added } = this.graph.sync(this.map);
     if (opts.relayout || (added.length && this.layout.name === 'force' && this.layout.live))
       this.graph.runLayout(this.map, { persist: true, fit: opts.fit ?? false });
     this.renderToolbar();
     if (opts.panel !== false) this.renderPanel();
+    if (opts.popup) this.renderPopup();
+    else this.placePopup();
     this.renderStatus();
     this.save();
   }
@@ -143,64 +185,106 @@ class App {
     return this.map.edges.find((e) => e.id === id);
   }
 
-  addNode(pos?: { x: number; y: number }) {
-    const id = newId('n', this.map.nodes.map((n) => n.id));
-    const ext = this.graph.cy.extent();
-    const node: BrainNode = {
-      id,
-      label: `Node ${id.slice(1)}`,
-      type: this.newNodeType || undefined,
-      position: pos ?? { x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 },
-    };
-    // A node selected at creation time becomes the parent of the new node.
-    const parent = this.selection.length === 1 ? this.node(this.selection[0]) : undefined;
-    this.map.nodes.push(node);
-    if (parent && !pos) {
-      const p = this.graph.cy.getElementById(parent.id).position();
-      node.position = { x: p.x + 60 + Math.random() * 60, y: p.y + 80 };
-      this.map.edges.push(this.makeEdge(parent.id, id));
-    }
-    this.commit();
-    this.selection = [id];
-    this.graph.select([id]);
-    this.tab = 'inspect';
-    this.renderPanel();
-    (this.panel.querySelector('input[name=label]') as HTMLInputElement | null)?.select();
+  private nextLabel() {
+    const used = new Set(this.map.nodes.map((n) => n.label));
+    let i = this.map.nodes.length + 1;
+    while (used.has(`Node ${i}`)) i++;
+    return `Node ${i}`;
   }
 
-  private makeEdge(source: string, target: string): BrainEdge {
+  /** Creates a node, selects it and puts the cursor into its name field. */
+  private addNode(pos: Position, connectFrom?: string) {
+    const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel(), position: pos };
+    const parent = connectFrom ? this.node(connectFrom) : undefined;
+    // A connected node inherits the type of its parent – usually what you want in a mind map.
+    if (parent?.type) node.type = parent.type;
+    this.map.nodes.push(node);
+    if (parent) this.map.edges.push(this.makeEdge(parent.id, node.id));
+    this.commit();
+    this.graph.select([node.id]);
+    this.focusName();
+  }
+
+  private createFirstNode() {
+    this.graph.cy.zoom(1);
+    this.graph.centerPoint({ x: 0, y: 0 });
+    this.addNode({ x: 0, y: 0 });
+  }
+
+  /** Adds a node next to `parentId`, in the direction with the most free space. */
+  addConnectedNode(parentId: string) {
+    const p = this.graph.cy.getElementById(parentId).position();
+    const dist = this.layout.edgeLength + 40;
+    const others = this.graph.cy.nodes().not('.hidden').map((n) => (n as any).position() as Position);
+    let best = { x: p.x + dist, y: p.y };
+    let bestScore = -1;
+    for (let i = 0; i < 16; i++) {
+      // Start pointing down-right and walk around the circle.
+      const a = Math.PI / 4 + (i * Math.PI * 2) / 16;
+      const c = { x: p.x + Math.cos(a) * dist, y: p.y + Math.sin(a) * dist };
+      const score = Math.min(...others.map((o) => Math.hypot(o.x - c.x, o.y - c.y)));
+      if (score > bestScore + 1) {
+        bestScore = score;
+        best = c;
+      }
+    }
+    this.addNode(best, parentId);
+  }
+
+  private focusName() {
+    window.setTimeout(() => {
+      const input = this.popup.body.querySelector('input[name=label]') as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+    }, 30);
+  }
+
+  private makeEdge(source: string, target: string, directed = true): BrainEdge {
     return {
       id: newId('e', this.map.edges.map((e) => e.id)),
       source,
       target,
-      type: this.newEdgeType || undefined,
+      type: this.edgeType || undefined,
+      directed: directed ? undefined : false,
     };
   }
 
-  addEdge(source: string, target: string) {
-    const e = this.makeEdge(source, target);
+  private connect(source: string, target: string, directed: boolean) {
+    const e = this.makeEdge(source, target, directed);
     this.map.edges.push(e);
     this.commit();
     this.graph.select([e.id]);
   }
 
-  deleteSelection() {
-    if (!this.selection.length) return;
-    const ids = new Set(this.selection);
-    this.map.nodes = this.map.nodes.filter((n) => !ids.has(n.id));
-    const nodeIds = new Set(this.map.nodes.map((n) => n.id));
-    this.map.edges = this.map.edges.filter((e) => !ids.has(e.id) && nodeIds.has(e.source) && nodeIds.has(e.target));
-    for (const s of this.map.settings.slices ?? []) s.roots = s.roots?.filter((r) => nodeIds.has(r));
-    this.selection = [];
-    this.commit();
+  /** Asks for confirmation, then deletes the elements and every edge touching a deleted node. */
+  async requestDelete(ids: string[]) {
+    const nodes = ids.map((id) => this.node(id)).filter((n): n is BrainNode => !!n);
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const edges = this.map.edges.filter((e) => ids.includes(e.id) || nodeIds.has(e.source) || nodeIds.has(e.target));
+    if (!nodes.length && !edges.length) return;
+    const attached = edges.filter((e) => !ids.includes(e.id)).length;
+    let message: string;
+    if (nodes.length === 1 && edges.length === attached)
+      message = `Delete node "${nameOf(nodes[0])}"?` + (attached ? ` Its ${attached} connection${attached > 1 ? 's' : ''} will be deleted too.` : '');
+    else if (!nodes.length && edges.length === 1)
+      message = `Delete the connection "${nameOf(this.node(edges[0].source))} ${edges[0].directed === false ? '↔' : '→'} ${nameOf(this.node(edges[0].target))}"?`;
+    else message = `Delete ${nodes.length} node(s) and ${edges.length} connection(s)?`;
+    if (!(await confirmDialog(document.body, message))) return;
+
+    const edgeIds = new Set(edges.map((e) => e.id));
+    this.map.nodes = this.map.nodes.filter((n) => !nodeIds.has(n.id));
+    this.map.edges = this.map.edges.filter((e) => !edgeIds.has(e.id));
+    for (const s of this.map.settings.slices ?? []) s.roots = s.roots?.filter((r) => !nodeIds.has(r));
+    this.selection = this.selection.filter((id) => !nodeIds.has(id) && !edgeIds.has(id));
+    this.commit({ popup: true });
   }
 
-  private renameNode(node: BrainNode, newIdValue: string) {
-    const id = newIdValue.trim();
+  private renameNodeId(node: BrainNode, value: string) {
+    const id = value.trim();
     if (!id || id === node.id) return;
     if (this.node(id)) {
       post({ type: 'notify', level: 'error', message: `A node with id "${id}" already exists.` });
-      this.renderPanel();
+      this.renderPopup();
       return;
     }
     const old = node.id;
@@ -210,21 +294,67 @@ class App {
     }
     for (const s of this.map.settings.slices ?? []) s.roots = s.roots?.map((r) => (r === old ? id : r));
     node.id = id;
-    this.selection = [id];
     this.commit();
     this.graph.select([id]);
-  }
-
-  private toggleConnect(on = !this.connect) {
-    this.connect = on;
-    this.graph.setConnectMode(on);
-    this.renderToolbar();
-    this.renderStatus();
   }
 
   private showSlice(name: string | undefined) {
     this.map.settings.activeSlice = name || undefined;
     this.commit({ relayout: true, fit: true });
+  }
+
+  // ---------------------------------------------------------------- context menu & keys
+
+  private openMenu(target: { kind: 'node' | 'edge' | 'background'; id?: string }, at: Position, pos: Position) {
+    const items: MenuItem[] = [];
+    if (target.kind === 'node' && target.id) {
+      const id = target.id;
+      items.push({ label: '＋ Add connected node', hint: 'N', action: () => this.addConnectedNode(id) });
+      const selectedNodes = this.selection.filter((s) => this.node(s));
+      if (selectedNodes.length === 2 && selectedNodes.includes(id)) {
+        const other = selectedNodes.find((s) => s !== id)!;
+        const [a, b] = [nameOf(this.node(other)), nameOf(this.node(id))];
+        items.push(
+          'separator',
+          { label: `Connect ${a} → ${b}`, action: () => this.connect(other, id, true) },
+          { label: `Connect ${b} → ${a}`, action: () => this.connect(id, other, true) },
+          { label: `Connect ${a} ↔ ${b}`, action: () => this.connect(other, id, false) },
+        );
+      }
+      items.push(
+        'separator',
+        { label: 'Edit', action: () => this.graph.select([id]) },
+        { label: 'Slice from here', action: () => this.sliceFrom([id]) },
+        'separator',
+        { label: 'Delete node…', hint: '⌫', danger: true, action: () => this.requestDelete([id]) },
+      );
+    } else if (target.kind === 'edge' && target.id) {
+      const e = this.edge(target.id);
+      if (!e) return;
+      const bidirectional = e.directed === false;
+      items.push(
+        { label: 'Edit', action: () => this.graph.select([e.id]) },
+        bidirectional
+          ? { label: 'Make one-way →', action: () => { e.directed = undefined; this.commit({ popup: true }); } }
+          : { label: 'Make two-way ↔', action: () => { e.directed = false; this.commit({ popup: true }); } },
+        ...(!bidirectional ? [{ label: 'Reverse direction ⇄', action: () => this.reverse(e) }] : []),
+        'separator',
+        { label: 'Delete connection…', hint: '⌫', danger: true, action: () => this.requestDelete([e.id]) },
+      );
+    } else {
+      items.push(
+        { label: '＋ Add node here', action: () => this.addNode(pos) },
+        'separator',
+        { label: 'Fit view', hint: 'F', action: () => this.graph.fit() },
+        { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map, { persist: true }) },
+      );
+    }
+    this.menu.show(items, at);
+  }
+
+  private reverse(e: BrainEdge) {
+    [e.source, e.target] = [e.target, e.source];
+    this.commit({ popup: true });
   }
 
   private onKey(e: KeyboardEvent) {
@@ -233,18 +363,22 @@ class App {
       if (e.key === 'Escape') t.blur();
       return;
     }
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || this.menu.open || document.querySelector('.modal')) return;
     switch (e.key) {
       case 'Delete':
       case 'Backspace':
-        this.deleteSelection();
+        this.requestDelete(this.selection);
         break;
-      case 'n':
-        this.addNode();
+      case 'n': {
+        const nodes = this.selection.filter((id) => this.node(id));
+        if (nodes.length === 1) this.addConnectedNode(nodes[0]);
+        else if (!this.map.nodes.length) this.createFirstNode();
+        else {
+          const ext = this.graph.cy.extent();
+          this.addNode({ x: (ext.x1 + ext.x2) / 2, y: (ext.y1 + ext.y2) / 2 });
+        }
         break;
-      case 'e':
-        this.toggleConnect();
-        break;
+      }
       case 'f':
         this.graph.fit();
         break;
@@ -252,8 +386,7 @@ class App {
         this.graph.runLayout(this.map, { persist: true });
         break;
       case 'Escape':
-        if (this.connect) this.toggleConnect(false);
-        else this.graph.select([]);
+        this.graph.select([]);
         break;
       default:
         return;
@@ -261,21 +394,147 @@ class App {
     e.preventDefault();
   }
 
-  // ---------------------------------------------------------------- rendering
+  // ---------------------------------------------------------------- floating editor
 
-  render() {
-    this.renderToolbar();
-    this.renderPanel();
-    this.renderStatus();
+  private placePopup() {
+    if (!this.popup.visible) return;
+    if (this.selection.length === 1) {
+      const box = this.graph.renderedBox(this.selection[0]);
+      if (!box) return this.popup.hide();
+      this.popup.place(box);
+    } else {
+      const boxes = this.selection.map((id) => this.graph.renderedBox(id)).filter((b) => !!b);
+      if (!boxes.length) return this.popup.hide();
+      this.popup.place({
+        x1: Math.min(...boxes.map((b) => b!.x1)),
+        x2: Math.max(...boxes.map((b) => b!.x2)),
+        y1: Math.min(...boxes.map((b) => b!.y1)),
+        y2: Math.max(...boxes.map((b) => b!.y2)),
+      });
+    }
   }
 
+  private renderPopup() {
+    const sel = this.selection;
+    const node = sel.length === 1 ? this.node(sel[0]) : undefined;
+    const edge = sel.length === 1 ? this.edge(sel[0]) : undefined;
+    const twoNodes = sel.length === 2 && sel.every((id) => this.node(id));
+    if (node) this.popup.show('Node', this.nodeEditor(node));
+    else if (edge) this.popup.show('Connection', this.edgeEditor(edge));
+    else if (twoNodes)
+      this.popup.show('2 nodes selected', [
+        h('p', { class: 'muted small' }, 'Right-click one of them to connect the two.'),
+        h('div', { class: 'row' },
+          h('button', { onclick: () => this.connect(sel[0], sel[1], true) }, `${nameOf(this.node(sel[0]))} → ${nameOf(this.node(sel[1]))}`),
+          h('button', { onclick: () => this.connect(sel[0], sel[1], false) }, '↔'),
+        ),
+      ]);
+    else if (sel.length > 1)
+      this.popup.show(`${sel.length} selected`, [
+        h('div', { class: 'row' }, h('button', { class: 'danger', onclick: () => this.requestDelete(sel) }, 'Delete all…')),
+      ]);
+    else this.popup.hide();
+    // Wait a frame so the centering animation has started before measuring.
+    requestAnimationFrame(() => this.placePopup());
+  }
+
+  /** Text input that writes the model on change (blur or Enter). */
+  private input(value: string | undefined, apply: (v: string) => void, attrs: Record<string, any> = {}) {
+    return h('input', {
+      value: value ?? '',
+      ...attrs,
+      onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
+      onchange: (e: Event) => {
+        apply((e.target as HTMLInputElement).value);
+        this.commit({ panel: this.panelOpen });
+      },
+    });
+  }
+
+  private nodeEditor(node: BrainNode): HTMLElement[] {
+    const color = resolveNodeStyle(this.map, node).color;
+    const more = h('details', { class: 'more' },
+      h('summary', {}, 'More'),
+      field('Id', h('input', {
+        value: node.id,
+        onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
+        onchange: (e: Event) => this.renameNodeId(node, (e.target as HTMLInputElement).value),
+      })),
+      field('Color', h('div', { class: 'row' },
+        h('input', { type: 'color', value: color, onchange: (e: Event) => { node.color = (e.target as HTMLInputElement).value; this.commit({ panel: false }); } }),
+        node.color
+          ? h('button', { onclick: () => { node.color = undefined; this.commit({ panel: false, popup: true }); } }, 'use type/tag color')
+          : h('span', { class: 'muted small' }, 'from type/tag'),
+      )),
+      field('Description', h('textarea', { rows: 3, value: node.description ?? '',
+        onchange: (e: Event) => { node.description = (e.target as HTMLTextAreaElement).value || undefined; this.commit({ panel: false }); } })),
+    );
+    return [
+      field('Name', this.input(node.label, (v) => (node.label = v), { name: 'label' })),
+      field('Type', this.input(node.type, (v) => (node.type = v.trim() || undefined), { list: 'dl-node-types', placeholder: 'e.g. service' })),
+      field('Tags', tagEditor(node.tags ?? [], (tags) => {
+        node.tags = tags.length ? tags : undefined;
+        this.commit({ panel: this.panelOpen });
+      }, 'dl-tags')),
+      more,
+      h('div', { class: 'row' },
+        h('button', { title: 'Add a connected node (N)', onclick: () => this.addConnectedNode(node.id) }, '＋ Connected node'),
+        h('button', { class: 'danger', title: 'Delete (Backspace)', onclick: () => this.requestDelete([node.id]) }, 'Delete…'),
+      ),
+    ];
+  }
+
+  private edgeEditor(edge: BrainEdge): HTMLElement[] {
+    const bidirectional = edge.directed === false;
+    const link = (id: string) => h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.graph.select([id]); } }, nameOf(this.node(id)));
+    return [
+      h('div', { class: 'edge-ends' }, link(edge.source), h('span', { class: 'arrow' }, bidirectional ? '↔' : '→'), link(edge.target)),
+      field('Direction', h('div', { class: 'segmented' },
+        h('button', { class: bidirectional ? '' : 'active', onclick: () => { edge.directed = undefined; this.commit({ panel: false, popup: true }); } }, '→ one-way'),
+        h('button', { class: bidirectional ? 'active' : '', onclick: () => { edge.directed = false; this.commit({ panel: false, popup: true }); } }, '↔ two-way'),
+        !bidirectional && h('button', { class: 'rev', title: 'Reverse direction', onclick: () => this.reverse(edge) }, '⇄'),
+      )),
+      field('Type', this.input(edge.type, (v) => {
+        edge.type = v.trim() || undefined;
+        if (edge.type) {
+          this.edgeType = edge.type;
+          this.saveUi({ edgeType: edge.type });
+        }
+      }, { list: 'dl-edge-types', placeholder: 'e.g. depends-on' })),
+      field('Tags', tagEditor(edge.tags ?? [], (tags) => {
+        edge.tags = tags.length ? tags : undefined;
+        this.commit({ panel: this.panelOpen });
+      }, 'dl-tags')),
+      field('Label', this.input(edge.label, (v) => (edge.label = v || undefined), { placeholder: 'optional' })),
+      h('div', { class: 'row' },
+        h('button', { class: 'danger', title: 'Delete (Backspace)', onclick: () => this.requestDelete([edge.id]) }, 'Delete…'),
+      ),
+    ];
+  }
+
+  // ---------------------------------------------------------------- toolbar, status, side panel
+
   private renderStatus() {
+    const empty = this.map.nodes.length === 0;
+    this.plus.classList.toggle('hidden', !empty);
     const slice = this.map.settings.activeSlice;
     const visible = this.graph.cy.nodes().not('.hidden').not('.dimmed').length;
-    this.status.textContent =
-      `${this.map.nodes.length} nodes · ${this.map.edges.length} edges · ${this.format.toUpperCase()}` +
-      (slice ? ` · slice "${slice}" (${visible} nodes)` : '') +
-      (this.connect ? ' · CONNECT MODE: drag from one node to another (Esc to exit)' : '');
+    this.status.textContent = empty
+      ? ''
+      : `${this.map.nodes.length} nodes · ${this.map.edges.length} connections · ${this.format.toUpperCase()}` +
+        (slice ? ` · slice "${slice}" (${visible} nodes)` : '') +
+        ' · right-click for actions · Ctrl/Shift+click to select more';
+  }
+
+  private renderLayoutState() {
+    this.saveUi({ panelOpen: this.panelOpen, tab: this.tab });
+    this.panel.classList.toggle('hidden', !this.panelOpen);
+    this.renderToolbar();
+    this.renderPanel();
+    requestAnimationFrame(() => {
+      this.graph.cy.resize();
+      this.placePopup();
+    });
   }
 
   private renderToolbar() {
@@ -290,27 +549,21 @@ class App {
       onkeydown: (e: KeyboardEvent) => {
         if (e.key !== 'Enter') return;
         const hits = this.graph.highlightSearch((e.target as HTMLInputElement).value);
-        if (hits.length) this.graph.select(hits, true);
+        if (hits.length) {
+          this.graph.select(hits.slice(0, 1));
+          this.graph.centerOn(hits);
+        }
       },
       oninput: (e: Event) => this.graph.highlightSearch((e.target as HTMLInputElement).value),
     });
 
     this.toolbar.replaceChildren(
       h('div', { class: 'group' },
-        h('button', { title: 'Add node (N). With one node selected the new node becomes its child.', onclick: () => this.addNode() }, '+ Node'),
-        h('input', { class: 'type-input', placeholder: 'node type', list: 'dl-node-types', value: this.newNodeType, title: 'Type for new nodes',
-          onchange: (e: Event) => (this.newNodeType = (e.target as HTMLInputElement).value.trim()) }),
-        h('button', { class: this.connect ? 'active' : '', title: 'Connect mode (E): drag from node to node to create an edge', onclick: () => this.toggleConnect() }, '⤳ Connect'),
-        h('input', { class: 'type-input', placeholder: 'edge type', list: 'dl-edge-types', value: this.newEdgeType, title: 'Dependency type for new edges',
-          onchange: (e: Event) => (this.newEdgeType = (e.target as HTMLInputElement).value.trim()) }),
-        h('button', { title: 'Delete selection (Del)', disabled: !this.selection.length, onclick: () => this.deleteSelection() }, '🗑'),
-      ),
-      h('div', { class: 'group' },
         select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }), { title: 'Layout' }),
         (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
           select(
             [
-              { value: '', label: 'by: all edge types' },
+              { value: '', label: 'by: all types' },
               ...types.edgeTypes.map((t) => ({ value: t, label: `by: ${t}` })),
               ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by: ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
             ],
@@ -318,19 +571,22 @@ class App {
             (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
             { title: 'Dependency type that defines the hierarchy' },
           ),
-        h('button', { title: 'Run layout again (L)', onclick: () => this.graph.runLayout(this.map, { persist: true }) }, '↻ Layout'),
-        h('button', { title: 'Fit to screen (F)', onclick: () => this.graph.fit() }, '⛶ Fit'),
+        h('button', { class: 'icon', title: 'Run layout again (L)', onclick: () => this.graph.runLayout(this.map, { persist: true }) }, '↻'),
+        h('button', { class: 'icon', title: 'Fit everything into view (F)', onclick: () => this.graph.fit() }, '⛶'),
       ),
       h('div', { class: 'group' },
         select(
-          [{ value: '', label: 'Slice: full graph' }, ...slices.map((s) => ({ value: s.name, label: `Slice: ${s.name}` }))],
+          [{ value: '', label: 'Full graph' }, ...slices.map((s) => ({ value: s.name, label: `Slice: ${s.name}` }))],
           this.map.settings.activeSlice ?? '',
           (v) => this.showSlice(v),
           { title: 'Show a slice of the graph' },
         ),
       ),
       h('div', { class: 'group grow' }, search),
-      h('div', { class: 'group' }, h('button', { title: 'Open the file as text', onclick: () => post({ type: 'openText' }) }, '{ } Text')),
+      h('div', { class: 'group' },
+        h('button', { class: this.panelOpen ? 'active' : '', title: 'Style, layout and slice settings', onclick: () => { this.panelOpen = !this.panelOpen; this.renderLayoutState(); } }, '⚙ Settings'),
+        h('button', { title: 'Open the file as text', onclick: () => post({ type: 'openText' }) }, '{ }'),
+      ),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
       datalist('dl-tags', types.tags),
@@ -338,111 +594,17 @@ class App {
   }
 
   private renderPanel() {
-    vscode.setState({ tab: this.tab });
-    const tabs: [Tab, string][] = [['inspect', 'Inspector'], ['style', 'Style'], ['layout', 'Layout'], ['slices', 'Slices']];
-    const body =
-      this.tab === 'inspect' ? this.inspector()
-      : this.tab === 'style' ? this.stylePanel()
-      : this.tab === 'layout' ? this.layoutPanel()
-      : this.slicePanel();
+    this.panel.classList.toggle('hidden', !this.panelOpen);
+    if (!this.panelOpen) return;
+    const tabs: [Tab, string][] = [['layout', 'Layout'], ['style', 'Style'], ['slices', 'Slices']];
+    const body = this.tab === 'style' ? this.stylePanel() : this.tab === 'slices' ? this.slicePanel() : this.layoutPanel();
     this.panel.replaceChildren(
       h('div', { class: 'tabs' },
         tabs.map(([id, label]) =>
-          h('button', { class: this.tab === id ? 'tab active' : 'tab', onclick: () => { this.tab = id; this.renderPanel(); } }, label),
+          h('button', { class: this.tab === id ? 'tab active' : 'tab', onclick: () => { this.tab = id; this.renderLayoutState(); } }, label),
         ),
       ),
       h('div', { class: 'panel-body' }, body),
-    );
-  }
-
-  private inspector(): HTMLElement {
-    const sel = this.selection;
-    if (sel.length === 0) {
-      return h('div', {},
-        field('Title', h('input', { value: this.map.title ?? '', onchange: (e: Event) => { this.map.title = (e.target as HTMLInputElement).value; this.commit({ panel: false }); } })),
-        h('p', { class: 'muted' }, 'Select a node or edge to edit it.'),
-        h('ul', { class: 'help' },
-          h('li', {}, h('b', {}, 'Double-click'), ' empty space: new node'),
-          h('li', {}, h('b', {}, 'N'), ': new node (child of selection)'),
-          h('li', {}, h('b', {}, 'E'), ': connect mode – drag node to node'),
-          h('li', {}, h('b', {}, 'Del'), ': delete selection'),
-          h('li', {}, h('b', {}, 'Shift+drag'), ': box select'),
-          h('li', {}, h('b', {}, 'L'), ' layout · ', h('b', {}, 'F'), ' fit · ', h('b', {}, 'Ctrl+Z'), ' undo'),
-        ),
-      );
-    }
-    if (sel.length > 1) return this.multiInspector();
-    const node = this.node(sel[0]);
-    if (node) return this.nodeInspector(node);
-    const edge = this.edge(sel[0]);
-    if (edge) return this.edgeInspector(edge);
-    return h('div', {});
-  }
-
-  private text(value: string | undefined, apply: (v: string) => void, attrs: Record<string, any> = {}) {
-    return h('input', { value: value ?? '', ...attrs, onchange: (e: Event) => { apply((e.target as HTMLInputElement).value); this.commit({ panel: false }); } });
-  }
-
-  private nodeInspector(node: BrainNode): HTMLElement {
-    const outgoing = this.map.edges.filter((e) => e.source === node.id);
-    const incoming = this.map.edges.filter((e) => e.target === node.id);
-    const link = (id: string) => h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.graph.select([id], true); } }, this.node(id)?.label || id);
-    return h('div', {},
-      h('h3', {}, 'Node'),
-      field('Label', h('textarea', { name: 'label', rows: 2, value: node.label ?? '', onchange: (e: Event) => { node.label = (e.target as HTMLTextAreaElement).value; this.commit({ panel: false }); } })),
-      field('Id', h('input', { value: node.id, onchange: (e: Event) => this.renameNode(node, (e.target as HTMLInputElement).value) })),
-      field('Type', this.text(node.type, (v) => (node.type = v.trim() || undefined), { list: 'dl-node-types' })),
-      field('Tags (comma separated)', this.text(node.tags?.join(', '), (v) => (node.tags = splitList(v)), { list: 'dl-tags' })),
-      field('Color override',
-        h('div', { class: 'row' },
-          h('input', { type: 'color', value: node.color ?? '#6c7a89', onchange: (e: Event) => { node.color = (e.target as HTMLInputElement).value; this.commit({ panel: false }); } }),
-          node.color && h('button', { onclick: () => { node.color = undefined; this.commit(); } }, 'reset'),
-        ),
-      ),
-      field('Description', h('textarea', { rows: 4, value: node.description ?? '', onchange: (e: Event) => { node.description = (e.target as HTMLTextAreaElement).value || undefined; this.commit({ panel: false }); } })),
-      h('div', { class: 'row' },
-        h('button', { onclick: () => this.addNode() }, '+ Child'),
-        h('button', { onclick: () => this.sliceFrom([node.id]) }, 'Slice from here'),
-        h('button', { class: 'danger', onclick: () => this.deleteSelection() }, 'Delete'),
-      ),
-      (outgoing.length > 0 || incoming.length > 0) && h('h4', {}, 'Connections'),
-      h('ul', { class: 'links' },
-        outgoing.map((e) => h('li', {}, '→ ', link(e.target), h('span', { class: 'muted' }, ` ${e.type ?? ''}`))),
-        incoming.map((e) => h('li', {}, '← ', link(e.source), h('span', { class: 'muted' }, ` ${e.type ?? ''}`))),
-      ),
-    );
-  }
-
-  private edgeInspector(edge: BrainEdge): HTMLElement {
-    const nodeOptions = this.map.nodes.map((n) => ({ value: n.id, label: n.label || n.id }));
-    return h('div', {},
-      h('h3', {}, 'Edge'),
-      field('Source', select(nodeOptions, edge.source, (v) => { edge.source = v; this.commit({ panel: false }); })),
-      field('Target', select(nodeOptions, edge.target, (v) => { edge.target = v; this.commit({ panel: false }); })),
-      field('Dependency type', this.text(edge.type, (v) => (edge.type = v.trim() || undefined), { list: 'dl-edge-types' })),
-      field('Label', this.text(edge.label, (v) => (edge.label = v || undefined))),
-      h('div', { class: 'row' },
-        h('button', { onclick: () => { [edge.source, edge.target] = [edge.target, edge.source]; this.commit({ panel: false }); } }, '⇄ Reverse'),
-        h('button', { class: 'danger', onclick: () => this.deleteSelection() }, 'Delete'),
-      ),
-    );
-  }
-
-  private multiInspector(): HTMLElement {
-    const nodes = this.selection.map((id) => this.node(id)).filter((n): n is BrainNode => !!n);
-    const edges = this.selection.map((id) => this.edge(id)).filter((e): e is BrainEdge => !!e);
-    return h('div', {},
-      h('h3', {}, `${nodes.length} nodes, ${edges.length} edges selected`),
-      nodes.length > 0 && field('Set type of nodes', this.text('', (v) => nodes.forEach((n) => (n.type = v.trim() || undefined)), { list: 'dl-node-types' })),
-      nodes.length > 0 && field('Add tag to nodes', this.text('', (v) => {
-        const tags = splitList(v);
-        nodes.forEach((n) => (n.tags = [...new Set([...(n.tags ?? []), ...tags])]));
-      }, { list: 'dl-tags' })),
-      edges.length > 0 && field('Set dependency type of edges', this.text('', (v) => edges.forEach((e) => (e.type = v.trim() || undefined)), { list: 'dl-edge-types' })),
-      h('div', { class: 'row' },
-        nodes.length > 0 && h('button', { onclick: () => this.sliceFrom(nodes.map((n) => n.id)) }, 'Slice from these'),
-        h('button', { class: 'danger', onclick: () => this.deleteSelection() }, 'Delete all'),
-      ),
     );
   }
 
@@ -516,7 +678,7 @@ class App {
       slider(l.name === 'hierarchy' ? 'Level distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.live, onchange: (e: Event) => this.setLayout({ live: (e.target as HTMLInputElement).checked }) }),
-        'Live physics (neighbours follow while dragging)'),
+        'Live physics with cola (neighbours follow while dragging)'),
       l.name !== 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.animate, onchange: (e: Event) => this.setLayout({ animate: (e.target as HTMLInputElement).checked }) }),
         'Animate transitions'),
@@ -531,6 +693,9 @@ class App {
           h('input', { type: 'checkbox', checked: l.hideOtherEdges, onchange: (e: Event) => this.setLayout({ hideOtherEdges: (e.target as HTMLInputElement).checked }) }),
           'Hide edges of other types'),
       ],
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: l.followSelection, onchange: (e: Event) => this.setLayout({ followSelection: (e.target as HTMLInputElement).checked }, false) }),
+        'Center view on the selected node'),
       h('div', { class: 'row' },
         h('button', { onclick: () => this.graph.runLayout(this.map, { persist: true }) }, '↻ Run layout'),
         h('button', { title: 'Keep the current positions and switch to manual layout', onclick: () => {
@@ -544,6 +709,8 @@ class App {
 
   private sliceFrom(roots: string[]) {
     this.tab = 'slices';
+    this.panelOpen = true;
+    this.renderLayoutState();
     this.editingSlice = { name: `${this.node(roots[0])?.label || roots[0]} neighbourhood`, roots, direction: 'downstream' };
     this.renderPanel();
   }

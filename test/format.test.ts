@@ -82,3 +82,13 @@ test('colors by type, tag and override', () => {
   assert.equal(resolveNodeStyle(m, m.nodes[0]).color, '#ff0000');
   assert.equal(resolveNodeStyle(m, m.nodes[1]).color, '#00ff00');
 });
+
+test('bidirectional edges are followed both ways in slices', () => {
+  const m = normalize({
+    nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    edges: [{ source: 'b', target: 'a', directed: false, tags: ['x'] }, { source: 'c', target: 'b' }],
+  });
+  assert.deepEqual(m.edges[0].tags, ['x']);
+  const s = computeSlice(m, { name: 's', roots: ['a'], direction: 'downstream' });
+  assert.deepEqual([...s.nodes].sort(), ['a', 'b']);
+});

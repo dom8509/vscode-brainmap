@@ -2,7 +2,6 @@ import cytoscape, { Core, ElementDefinition, Layouts, NodeSingular } from 'cytos
 import cola from 'cytoscape-cola';
 import fcose from 'cytoscape-fcose';
 import dagre from 'cytoscape-dagre';
-import edgehandles from 'cytoscape-edgehandles';
 import {
   BrainMap,
   DEFAULT_LAYOUT,
@@ -16,14 +15,16 @@ import {
 cytoscape.use(cola);
 cytoscape.use(fcose);
 cytoscape.use(dagre);
-cytoscape.use(edgehandles);
 
 export interface GraphCallbacks {
   onSelect(ids: string[]): void;
   /** User moved nodes; positions should be persisted. */
   onPositions(positions: Record<string, Position>): void;
-  onConnect(source: string, target: string): void;
   onBackgroundDoubleClick(pos: Position): void;
+  /** Right click on a node, an edge or the background. */
+  onContextMenu(target: { kind: 'node' | 'edge' | 'background'; id?: string }, client: Position, pos: Position): void;
+  /** Pan, zoom or node movement changed where things are on screen. */
+  onViewport(): void;
 }
 
 const cssVar = (name: string, fallback: string) =>
@@ -31,10 +32,11 @@ const cssVar = (name: string, fallback: string) =>
 
 export class GraphView {
   readonly cy: Core;
-  private eh: any;
   private layout?: Layouts;
   private saveTimer?: number;
-  private connectMode = false;
+  private selTimer?: number;
+  /** Center the view on the selection (layout setting `followSelection`). */
+  follow = true;
 
   constructor(container: HTMLElement, private readonly cb: GraphCallbacks) {
     this.cy = cytoscape({
@@ -43,29 +45,27 @@ export class GraphView {
       minZoom: 0.05,
       maxZoom: 4,
       boxSelectionEnabled: true,
-      selectionType: 'additive',
+      selectionType: 'single',
       style: this.stylesheet(),
     });
 
-    this.eh = (this.cy as any).edgehandles({
-      canConnect: (s: NodeSingular, t: NodeSingular) => !s.same(t),
-      edgeParams: () => ({ data: { color: cssVar('--vscode-focusBorder', '#007fd4') } }),
-      hoverDelay: 100,
-      snap: true,
-    });
-
-    this.cy.on('ehcomplete', (_e: unknown, source: NodeSingular, target: NodeSingular, added: any) => {
-      added.remove();
-      this.cb.onConnect(source.id(), target.id());
-    });
-
     this.cy.on('select unselect', () => {
-      window.clearTimeout((this as any).selTimer);
-      (this as any).selTimer = window.setTimeout(
-        () => this.cb.onSelect(this.cy.$(':selected').map((e) => e.id())),
-        10,
-      );
+      window.clearTimeout(this.selTimer);
+      this.selTimer = window.setTimeout(() => {
+        const ids = this.cy.$(':selected').map((e) => e.id());
+        if (this.follow && ids.length) this.centerOn(ids);
+        this.cb.onSelect(ids);
+      }, 10);
     });
+
+    this.cy.on('cxttap', (e) => {
+      const t = e.target;
+      const kind = t === this.cy ? 'background' : t.isNode() ? 'node' : 'edge';
+      const oe = e.originalEvent as MouseEvent;
+      this.cb.onContextMenu({ kind, id: kind === 'background' ? undefined : t.id() }, { x: oe.clientX, y: oe.clientY }, e.position);
+    });
+    container.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.cy.on('viewport position', () => this.cb.onViewport());
 
     // The canvas changes size when the toolbar wraps or the editor is resized.
     new ResizeObserver(() => this.cy.resize()).observe(container);
@@ -78,7 +78,6 @@ export class GraphView {
 
     // Highlight the neighbourhood of the hovered node.
     this.cy.on('mouseover', 'node', (e) => {
-      if (this.connectMode) return;
       const hood = e.target.closedNeighborhood();
       this.cy.elements().not(hood).addClass('faded');
       hood.addClass('hover');
@@ -100,15 +99,13 @@ export class GraphView {
           shape: 'data(shape)',
           width: 'data(width)',
           height: 'data(size)',
-          color: '#ffffff',
+          color: 'data(textColor)',
           'font-family': font,
           'font-size': 12,
           'text-valign': 'center',
           'text-halign': 'center',
           'text-wrap': 'wrap',
           'text-max-width': '160px',
-          'text-outline-color': 'data(color)',
-          'text-outline-width': 1.5,
           'border-width': 1,
           'border-color': bg,
           'transition-property': 'opacity, background-color, border-width',
@@ -127,6 +124,8 @@ export class GraphView {
           'line-style': 'data(lineStyle)',
           'target-arrow-color': 'data(color)',
           'target-arrow-shape': 'triangle',
+          'source-arrow-color': 'data(color)',
+          'source-arrow-shape': 'data(sourceArrow)',
           'arrow-scale': 1.1,
           'curve-style': 'bezier',
           label: 'data(label)',
@@ -143,21 +142,12 @@ export class GraphView {
       },
       {
         selector: 'edge:selected',
-        style: { width: 4, 'line-color': focus, 'target-arrow-color': focus, 'overlay-opacity': 0 } as any,
+        style: { width: 4, 'line-color': focus, 'target-arrow-color': focus, 'source-arrow-color': focus, 'overlay-opacity': 0 } as any,
       },
       { selector: '.faded', style: { opacity: 0.25 } },
       { selector: '.dimmed', style: { opacity: 0.1, events: 'no' } as any },
       { selector: '.hidden', style: { display: 'none' } },
       { selector: '.search-hit', style: { 'border-width': 4, 'border-color': '#ffd700' } as any },
-      {
-        selector: '.eh-handle, .eh-ghost-node',
-        style: { 'background-color': focus, width: 10, height: 10, shape: 'ellipse', label: '' } as any,
-      },
-      {
-        selector: '.eh-preview, .eh-ghost-edge',
-        style: { 'line-color': focus, 'target-arrow-color': focus, 'line-style': 'dashed', label: '' } as any,
-      },
-      { selector: '.eh-hover', style: { 'border-width': 3, 'border-color': focus } as any },
     ];
   }
 
@@ -168,8 +158,8 @@ export class GraphView {
     cy.batch(() => {
       const nodeIds = new Set(map.nodes.map((n) => n.id));
       const edgeIds = new Set(map.edges.map((e) => e.id));
-      cy.edges().filter((e) => !edgeIds.has(e.id()) && !e.hasClass('eh-preview')).remove();
-      cy.nodes().filter((n) => !nodeIds.has(n.id()) && !n.hasClass('eh-ghost-node')).remove();
+      cy.edges().filter((e) => !edgeIds.has(e.id())).remove();
+      cy.nodes().filter((n) => !nodeIds.has(n.id())).remove();
 
       const center = this.viewportCenter();
       const toAdd: ElementDefinition[] = [];
@@ -181,6 +171,7 @@ export class GraphView {
           id: n.id,
           label,
           color: st.color,
+          textColor: readableText(st.color),
           shape: st.shape,
           size: st.size,
           width: Math.max(st.size, Math.min(longest, 24) * 7 + 24),
@@ -213,6 +204,7 @@ export class GraphView {
           source: e.source,
           target: e.target,
           label: e.label ?? '',
+          sourceArrow: e.directed === false ? 'triangle' : 'none',
           type: e.type ?? '',
           color: st.color,
           lineStyle: st.lineStyle,
@@ -278,7 +270,7 @@ export class GraphView {
     const l: Required<LayoutSettings> = { ...DEFAULT_LAYOUT, ...map.settings.layout };
     const edgeStyles = map.settings.style?.edgeTypes ?? {};
     const lengthOf = (edge: any) => edgeStyles[edge.data('type')]?.length ?? l.edgeLength;
-    const fit = opts.fit ?? true;
+    const fit = (opts.fit ?? true) && !(this.follow && this.cy.$(':selected').nonempty());
     const visible = this.cy.elements().not('.hidden');
     const anim = { animate: l.animate, animationDuration: 600, animationEasing: 'ease-in-out-cubic', fit, padding: 40 };
 
@@ -294,6 +286,7 @@ export class GraphView {
           fit: fit && !l.live,
           padding: 40,
           randomize: false,
+          centerGraph: false,
           avoidOverlap: true,
           handleDisconnected: true,
           nodeSpacing: () => l.nodeSpacing / 2,
@@ -365,8 +358,16 @@ export class GraphView {
       if (l.name === 'force' && l.live) this.schedulePositionSave(3000);
       else layout.one('layoutstop', () => this.schedulePositionSave(50));
     }
+    // With a selection and followSelection, the selection decides the view instead of fitting everything.
+    // Read the selection when the layout settles: it may change while the layout runs.
+    const settle = () => {
+      const selected = this.follow ? this.cy.$(':selected').map((e) => e.id()) : [];
+      if (selected.length) this.centerOn(selected);
+      else if (fit && l.name === 'force' && l.live) this.fit();
+    };
+    if (l.name === 'force' && l.live) window.setTimeout(() => this.layout === layout && settle(), 1200);
+    else layout.one('layoutstop', settle);
     layout.run();
-    if (fit && l.name === 'force' && l.live) window.setTimeout(() => this.layout === layout && this.fit(), 1200);
   }
 
   private schedulePositionSave(delay: number) {
@@ -377,29 +378,37 @@ export class GraphView {
   positions(): Record<string, Position> {
     const out: Record<string, Position> = {};
     this.cy.nodes().forEach((n) => {
-      if (n.hasClass('eh-ghost-node')) return;
       const p = n.position();
       out[n.id()] = { x: Math.round(p.x), y: Math.round(p.y) };
     });
     return out;
   }
 
-  setConnectMode(on: boolean) {
-    this.connectMode = on;
-    if (on) this.eh.enableDrawMode();
-    else this.eh.disableDrawMode();
-    this.cy.elements().removeClass('faded hover');
-  }
-
-  select(ids: string[], center = false) {
+  select(ids: string[]) {
     this.cy.batch(() => {
       this.cy.$(':selected').unselect();
       ids.forEach((id) => this.cy.getElementById(id).select());
     });
-    if (center && ids.length) {
-      const eles = this.cy.collection(ids.map((id) => this.cy.getElementById(id)) as any);
-      this.cy.animate({ center: { eles }, zoom: Math.max(this.cy.zoom(), 1) } as any, { duration: 400 });
-    }
+  }
+
+  centerOn(ids: string[], duration = 350) {
+    const eles = this.cy.collection(ids.map((id) => this.cy.getElementById(id)) as any).not('.hidden');
+    if (eles.empty()) return;
+    this.cy.stop(true);
+    this.cy.animate({ center: { eles } } as any, { duration });
+  }
+
+  /** Screen box (relative to the canvas) of an element. */
+  renderedBox(id: string) {
+    const el = this.cy.getElementById(id);
+    if (el.empty() || el.hasClass('hidden')) return undefined;
+    return el.renderedBoundingBox({ includeLabels: false } as any);
+  }
+
+  /** Puts the model point (x, y) in the middle of the canvas. */
+  centerPoint(p: Position) {
+    this.cy.resize();
+    this.cy.pan({ x: this.cy.width() / 2 - p.x * this.cy.zoom(), y: this.cy.height() / 2 - p.y * this.cy.zoom() });
   }
 
   highlightSearch(text: string): string[] {
@@ -417,4 +426,13 @@ export class GraphView {
   fit() {
     this.cy.animate({ fit: { eles: this.cy.elements().not('.hidden'), padding: 40 } } as any, { duration: 400 });
   }
+}
+
+/** Black or white, whichever reads better on the given background. */
+function readableText(color: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1], 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#1e1e1e' : '#ffffff';
 }

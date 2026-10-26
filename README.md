@@ -8,19 +8,32 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 
 ## Features
 
-- **Edit in the UI** – add nodes (double-click / `N`), connect nodes (`E` + drag), delete (`Del`),
-  edit label, id, type, tags, color and description in the inspector. Undo/redo with `Ctrl+Z` / `Ctrl+Y`.
-- **Layouts** – force (live physics), fCoSE, hierarchy (dagre), tree, concentric, circle, grid, manual.
-- **Hierarchy by dependency type** – pick which edge types (e.g. `depends-on`, `part-of`) build the hierarchy.
-  Edges of other types are still drawn, or can be hidden.
-- **Proximity** – node spacing, edge length and a preferred length per dependency type
+- **Start** – an empty graph shows one big **+** in the middle. Click it to create the first node.
+- **Right-click a node** – add a connected node, slice from here, delete.
+- **Select two nodes** (Ctrl/Shift+click) and right-click one of them – connect them
+  (A → B, B → A or A ↔ B).
+- **Right-click a connection** – make it one-way / two-way, reverse it, delete it.
+- **Floating edit window** – selecting a node shows its name, type and tags (all editable;
+  "More" has id, color and description). Selecting a connection shows its type, tags,
+  direction and label. Drag the window by its header to park it; ⌖ attaches it to the selection again.
+- **Delete** – right-click → Delete, or `Backspace`/`Del`. You are always asked first.
+  Deleting a node also deletes all its connections.
+- **View follows the selection** – the selected node moves to the middle of the view
+  (switch off in ⚙ Settings → Layout → "Center view on the selected node").
+- **Layouts** – force with live physics (cytoscape-cola), fCoSE, hierarchy (dagre), tree,
+  concentric, circle, grid, manual. With live physics the neighbours follow while you drag a node.
+- **Hierarchy by dependency type** – pick which connection types (e.g. `depends-on`, `part-of`)
+  build the hierarchy. Others are still drawn, or can be hidden.
+- **Proximity** – node spacing, edge length and a preferred length per connection type
   (smaller = connected nodes stay closer).
 - **Styling** – color nodes by type or by tag; per type: color, shape, size; per tag: color;
-  per edge type: color, line style. A node's own `color` always wins.
-- **Slices** – saved views of a part of the graph: filter by node type, tag, edge type and/or
-  the neighbourhood of start nodes (downstream / upstream / both, max depth). Nodes outside a slice are hidden or dimmed.
-- **Search** – type to highlight, `Enter` to jump to matches.
-- `{ } Text` opens the raw file next to the graph. Changes in either view sync both ways.
+  per connection type: color, line style. A node's own `color` always wins.
+- **Slices** – saved views of a part of the graph: filter by node type, tag, connection type and/or
+  the neighbourhood of start nodes (downstream / upstream / both, max depth). Two-way connections
+  are followed in both directions. Nodes outside a slice are hidden or dimmed.
+- **Keys** – `N` new connected node · `Backspace` delete · `F` fit · `L` re-run layout ·
+  `Esc` deselect · `Ctrl+Z` undo.
+- `{ }` opens the raw file next to the graph. Changes in either view sync both ways.
 
 ## File format
 
@@ -36,7 +49,8 @@ settings:
     direction: TB              # TB | BT | LR | RL
     nodeSpacing: 40
     edgeLength: 120
-    live: true                 # force layout keeps running
+    live: true                 # force layout (cola) keeps running
+    followSelection: true      # center the view on the selected node
   style:
     colorBy: type              # type | tag | none
     nodeTypes:
@@ -67,6 +81,8 @@ edges:
     source: web                # "from"/"to" are accepted too
     target: gateway
     type: depends-on
+    tags: [sync]
+    directed: false            # two-way (↔). Leave out for one-way (→)
     label: optional
 ```
 
