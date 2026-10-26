@@ -31,6 +31,7 @@ body {
 #app {
   display: flex;
   flex-direction: column;
+  container: app / inline-size;
 }
 .hidden {
   display: none !important;
@@ -153,10 +154,11 @@ button:disabled {
 
 /* ---------------------------------------------------------------- toolbar */
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand main end";
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px 16px;
   min-height: 56px;
   box-sizing: border-box;
   padding: 8px 14px;
@@ -164,6 +166,7 @@ button:disabled {
   background: var(--bm-bar);
 }
 .brand {
+  grid-area: brand;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -171,7 +174,8 @@ button:disabled {
   min-width: 0;
 }
 .brand .muted {
-  max-width: 200px;
+  max-width: 180px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -182,6 +186,39 @@ button:disabled {
 .toolbar .group {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+.tb-main {
+  grid-area: main;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  min-width: 0;
+}
+.tb-main .group {
+  flex-wrap: wrap;
+}
+.search svg {
+  flex: none;
+}
+.tb-end {
+  grid-area: end;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tb-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--bm-border);
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
 }
 .segmented-bar {
@@ -224,9 +261,8 @@ button:disabled {
   font-size: 12px;
 }
 .search {
-  flex: 0 1 190px;
-  min-width: 120px;
-  margin-left: auto;
+  width: 190px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1533,5 +1569,52 @@ button:disabled {
   .minibar, .popover, .hovercard, .panel {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------- narrow toolbar */
+/* Narrower: the toggles lose their labels, then the middle moves to a second row. */
+@container app (max-width: 1480px) {
+  .tb-label {
+    display: none;
+  }
+  .search {
+    width: 160px;
+  }
+  .brand .muted {
+    max-width: 140px;
+  }
+  .toolbar .toggle {
+    width: 32px;
+    padding: 0;
+  }
+}
+@container app (max-width: 1340px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand end" "main main";
+  }
+}
+@container app (max-width: 560px) {
+  .brand b {
+    display: none;
+  }
+  .search kbd {
+    display: none;
+  }
+  .search {
+    width: 130px;
+  }
+}
+/* Very narrow: the search is an icon until it is used. */
+@container app (max-width: 440px) {
+  .search {
+    width: 32px;
+    padding: 0 9px;
+    cursor: text;
+    transition: width 0.15s ease;
+  }
+  .search:focus-within {
+    width: 150px;
   }
 }

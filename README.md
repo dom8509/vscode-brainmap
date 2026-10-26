@@ -38,6 +38,10 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Details sidebar** (`D`, `⋯` or the *Details* button) – everything about the selection:
   name, type, tags, description, color, id and all connections; for a connection its
   direction, type, tags and label.
+- **Toolbar** – left the file, in the middle how the graph is arranged (Physics / Hierarchy / More…,
+  hierarchy type, *Layout ▾*) and what it shows (*Style ▾*, *Slices ▾*), on the right search, Groups,
+  Focus, Fit and Details – Details always at the right edge. In a narrow editor the buttons turn into
+  icons, the middle moves to a second row, and the search becomes an icon until you use it.
 - **Toolbar menus** – *Layout ▾* (spacing, edge length, direction, hierarchy types, run/fit),
   *Style ▾* (colors per type, tag and connection type) and *Slices ▾* (saved views).
 - **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.

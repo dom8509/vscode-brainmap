@@ -98,6 +98,8 @@ const ICON = {
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   type: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
   slice: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  groups: '<rect x="3" y="3" width="11" height="11" rx="3"/><rect x="10" y="10" width="11" height="11" rx="3"/>',
+  focus: '<circle cx="12" cy="12" r="3"/><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>',
 };
 
 /** How long the mouse rests on a node before its hover card shows. */
@@ -1220,7 +1222,7 @@ class App {
     const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
     const searchInput = h('input', {
       type: 'search',
-      placeholder: 'Search nodes…',
+      placeholder: 'Search…',
       'aria-label': 'Search nodes',
       onkeydown: (e: KeyboardEvent) => {
         if (e.key !== 'Enter') return;
@@ -1236,8 +1238,10 @@ class App {
       h('button', { class: l.name === name ? 'seg active' : 'seg', onclick: () => l.name !== name && this.setLayout({ name }) }, label);
     const others = LAYOUTS.filter((x) => x.value !== 'force' && x.value !== 'hierarchy');
     const isOther = others.some((x) => x.value === l.name);
-    const toggle = (on: boolean, label: string, title: string, onclick: () => void) =>
-      h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-pressed': String(on), onclick }, label);
+    // The label hides when the bar gets narrow; the icon stays.
+    const toggle = (on: boolean, icon: string, label: string, title: string, onclick: () => void) =>
+      h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-label': label, 'aria-pressed': String(on), onclick },
+        svgIcon(icon, 14), h('span', { class: 'tb-label' }, label));
     const iconBtn = (icon: string, title: string, onclick: () => void) =>
       h('button', { class: 'icon-btn', title, 'aria-label': title, onclick }, svgIcon(icon));
     const menuBtn = (kind: Tab, label: string) =>
@@ -1248,47 +1252,53 @@ class App {
       }, label, svgIcon(ICON.chevron, 11));
     const slice = this.map.settings.activeSlice;
 
+    // Brand on the left; how the graph is arranged and what it shows in the middle; search and
+    // view toggles on the right, with Details always last. Narrow, the middle moves to a second row.
     this.toolbar.replaceChildren(
       h('div', { class: 'brand' },
         h('span', { class: 'logo' }, svgIcon(ICON.logo, 20)),
         h('b', {}, 'BrainMap'),
-        this.fileName && h('span', { class: 'muted' }, `/ ${this.fileName}`),
+        this.fileName && h('span', { class: 'muted file-name', title: this.fileName }, `/ ${this.fileName}`),
       ),
-      h('div', { class: 'group' },
-        h('div', { class: 'segmented-bar' },
-          seg('force', 'Physics'),
-          seg('hierarchy', 'Hierarchy'),
-          select(
-            [{ value: '', label: isOther ? '' : 'More…' }, ...others],
-            isOther ? l.name : '',
-            (v) => v && this.setLayout({ name: v as LayoutName }),
-            { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' },
+      h('div', { class: 'tb-main' },
+        h('div', { class: 'group', role: 'group', 'aria-label': 'Arrange' },
+          h('div', { class: 'segmented-bar' },
+            seg('force', 'Physics'),
+            seg('hierarchy', 'Hierarchy'),
+            select(
+              [{ value: '', label: isOther ? '' : 'More…' }, ...others],
+              isOther ? l.name : '',
+              (v) => v && this.setLayout({ name: v as LayoutName }),
+              { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' },
+            ),
           ),
+          (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
+            select(
+              [
+                { value: '', label: 'by all types' },
+                ...types.edgeTypes.map((t) => ({ value: t, label: `by ${t}` })),
+                ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
+              ],
+              hierarchyValue,
+              (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
+              { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
+            ),
+          menuBtn('layout', 'Layout'),
         ),
-        (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
-          select(
-            [
-              { value: '', label: 'by all types' },
-              ...types.edgeTypes.map((t) => ({ value: t, label: `by ${t}` })),
-              ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
-            ],
-            hierarchyValue,
-            (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
-            { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
-          ),
+        h('div', { class: 'group', role: 'group', 'aria-label': 'Show' },
+          menuBtn('style', 'Style'),
+          menuBtn('slices', slice ? `Slice: ${slice}${this.sliceCount()}` : 'Slices'),
+        ),
       ),
-      h('div', { class: 'group' },
-        menuBtn('layout', 'Layout'),
-        menuBtn('style', 'Style'),
-        menuBtn('slices', slice ? `Slice: ${slice}${this.sliceCount()}` : 'Slices'),
-      ),
-      h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
-      h('div', { class: 'group' },
-        toggle(this.cards.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
-        toggle(this.graph.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
-        iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
-        h('button', { class: this.detailsOpen ? 'toggle on' : 'toggle', title: 'Details sidebar (D)', 'aria-pressed': String(this.detailsOpen), onclick: () => this.toggleDetails() },
-          svgIcon(ICON.details, 14), ' Details'),
+      h('div', { class: 'tb-end' },
+        h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
+        h('div', { class: 'group', role: 'group', 'aria-label': 'View' },
+          toggle(this.cards.groups, ICON.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
+          toggle(this.graph.focus, ICON.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
+          iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
+        ),
+        h('span', { class: 'tb-sep', 'aria-hidden': 'true' }),
+        toggle(this.detailsOpen, ICON.details, 'Details', 'Details sidebar (D)', () => this.toggleDetails()),
       ),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
