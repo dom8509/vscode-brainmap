@@ -513,38 +513,38 @@ button:disabled {
 }
 .legend {
   left: 14px;
+  bottom: 54px;
   max-width: 40%;
-  padding: 10px 28px 10px 12px;
+  padding: 10px 12px;
 }
-.bar-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--bm-muted);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.floating-bar:hover .bar-x, .bar-x:focus-visible {
-  opacity: 1;
-}
-.bar-x:hover {
-  color: var(--bm-fg);
-  background: color-mix(in srgb, var(--bm-fg) 10%, transparent);
-}
-.legend .bar-x {
+.bar-toggles {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 6px;
 }
-.hints .bar-x {
-  margin-left: -6px;
-  margin-right: -8px;
+.bar-toggle {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--bm-border);
+  background: color-mix(in srgb, var(--bm-surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--bm-muted);
+  font-weight: 700;
+  font-size: 13px;
+  font-family: Georgia, serif;
+}
+.bar-toggle:hover {
+  color: var(--bm-fg);
+}
+.bar-toggle.on {
+  color: var(--bm-accent);
+  border-color: color-mix(in srgb, var(--bm-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--bm-accent) 12%, var(--bm-surface));
 }
 .legend-inner {
   display: flex;

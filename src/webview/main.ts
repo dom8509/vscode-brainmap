@@ -151,7 +151,9 @@ class App {
   private error = h('div', { class: 'error hidden' });
   private empty = h('div', { class: 'empty hidden' });
   /** The bars at the bottom; the host sends the setting. */
-  bars: BarSettings = { legend: true, hints: true };
+  bars: BarSettings = { legend: false, hints: false };
+  /** The ? and i buttons at the bottom left that show the bars. */
+  private barToggles = h('div', { class: 'bar-toggles' });
   private legend = h('div', { class: 'legend floating-bar' });
   private hints = h('div', { class: 'hints floating-bar' });
   private dropChips = h('div', { class: 'drop-chips hidden' });
@@ -164,7 +166,7 @@ class App {
 
   constructor(root: HTMLElement) {
     const canvas = h('div', { class: 'canvas' });
-    this.stage.append(canvas, this.empty, this.legend, this.hints, this.dropChips, this.minibar, this.hovercard, this.error);
+    this.stage.append(canvas, this.empty, this.barToggles, this.legend, this.hints, this.dropChips, this.minibar, this.hovercard, this.error);
     root.append(this.toolbar, h('div', { class: 'main' }, this.stage, this.panel));
     this.menu = new ContextMenu(document.body);
     this.graph = new GraphView(canvas, {
@@ -1116,13 +1118,22 @@ class App {
     this.hints.replaceChildren(
       item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F', 'focus'), item('⌫', 'delete'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
-      this.hideBarButton('hints', 'Hide the shortcuts'),
     );
   }
 
-  private hideBarButton(bar: keyof BarSettings, title: string) {
-    return h('button', { class: 'bar-x', title: `${title} (Layout ▾ shows it again)`, 'aria-label': title, onclick: () => this.showBar(bar, false) },
-      svgIcon(ICON.close, 12));
+  private renderBarToggles() {
+    const btn = (bar: keyof BarSettings, label: string, title: string) =>
+      h('button', {
+        class: this.bars[bar] ? 'bar-toggle on' : 'bar-toggle',
+        title,
+        'aria-label': title,
+        'aria-pressed': String(this.bars[bar]),
+        onclick: () => this.showBar(bar, !this.bars[bar]),
+      }, label);
+    this.barToggles.replaceChildren(
+      btn('hints', '?', 'Keyboard shortcuts'),
+      btn('legend', 'i', 'Legend and stats'),
+    );
   }
 
   private showBar(bar: keyof BarSettings, show: boolean) {
@@ -1135,6 +1146,8 @@ class App {
   private renderOverlays() {
     const empty = this.map.nodes.length === 0;
     this.empty.classList.toggle('hidden', !empty);
+    this.renderBarToggles();
+    this.barToggles.classList.toggle('hidden', empty);
     this.legend.classList.toggle('hidden', empty || !this.bars.legend);
     this.hints.classList.toggle('hidden', empty || !this.bars.hints);
     if (empty) return;
@@ -1161,7 +1174,7 @@ class App {
         `${this.map.nodes.length} nodes · ${this.map.edges.length} connections · ${this.format.toUpperCase()}` +
           (slice ? ` · slice “${slice}”: ${visible} shown` : ''),
       ),
-    ), this.hideBarButton('legend', 'Hide the legend and stats'));
+    ));
   }
 
   // Layout, Style and Slices live in menus under the toolbar.
@@ -1343,12 +1356,6 @@ class App {
     const hierarchical = l.name === 'hierarchy' || l.name === 'breadthfirst';
     return h('div', {},
       field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: this.bars.legend, onchange: (e: Event) => this.showBar('legend', (e.target as HTMLInputElement).checked) }),
-        'Show legend and stats'),
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: this.bars.hints, onchange: (e: Event) => this.showBar('hints', (e.target as HTMLInputElement).checked) }),
-        'Show keyboard shortcuts'),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
       slider(l.name === 'hierarchy' ? 'Level distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },
