@@ -19,7 +19,7 @@ import {
 } from '../shared/model';
 import { describeFilter } from '../shared/filter';
 import { filterEditor } from './filterEditor';
-import { HostMessage, WebviewMessage } from '../shared/messages';
+import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
@@ -149,6 +149,8 @@ class App {
   private stage = h('div', { class: 'stage' });
   private error = h('div', { class: 'error hidden' });
   private empty = h('div', { class: 'empty hidden' });
+  /** The bars at the bottom; the host sends the setting. */
+  bars: BarSettings = { legend: true, hints: true };
   private legend = h('div', { class: 'legend floating-bar' });
   private hints = h('div', { class: 'hints floating-bar' });
   private dropChips = h('div', { class: 'drop-chips hidden' });
@@ -207,6 +209,12 @@ class App {
   // ---------------------------------------------------------------- messaging
 
   private onMessage(msg: HostMessage) {
+    if (msg.type === 'ui') {
+      this.bars = msg.bars;
+      this.renderOverlays();
+      this.renderSettings();
+      return;
+    }
     if (msg.type === 'error') {
       this.error.textContent = msg.message + ' — fix the file in the text editor.';
       this.error.classList.remove('hidden');
@@ -1107,15 +1115,27 @@ class App {
     this.hints.replaceChildren(
       item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F', 'focus'), item('⌫', 'delete'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
+      this.hideBarButton('hints', 'Hide the shortcuts'),
     );
+  }
+
+  private hideBarButton(bar: keyof BarSettings, title: string) {
+    return h('button', { class: 'bar-x', title: `${title} (Layout ▾ shows it again)`, 'aria-label': title, onclick: () => this.showBar(bar, false) },
+      svgIcon(ICON.close, 12));
+  }
+
+  private showBar(bar: keyof BarSettings, show: boolean) {
+    this.bars = { ...this.bars, [bar]: show };
+    this.renderOverlays();
+    post({ type: 'setBar', bar, show });
   }
 
   /** Empty state, legend and hint bar. */
   private renderOverlays() {
     const empty = this.map.nodes.length === 0;
     this.empty.classList.toggle('hidden', !empty);
-    this.legend.classList.toggle('hidden', empty);
-    this.hints.classList.toggle('hidden', empty);
+    this.legend.classList.toggle('hidden', empty || !this.bars.legend);
+    this.hints.classList.toggle('hidden', empty || !this.bars.hints);
     if (empty) return;
     const types = uniqueTypes(this.map);
     const usedNodeTypes = types.nodeTypes.filter((t) => this.map.nodes.some((n) => n.type === t));
@@ -1140,7 +1160,7 @@ class App {
         `${this.map.nodes.length} nodes · ${this.map.edges.length} connections · ${this.format.toUpperCase()}` +
           (slice ? ` · slice “${slice}”: ${visible} shown` : ''),
       ),
-    ));
+    ), this.hideBarButton('legend', 'Hide the legend and stats'));
   }
 
   // Layout, Style and Slices live in menus under the toolbar.
@@ -1322,6 +1342,12 @@ class App {
     const hierarchical = l.name === 'hierarchy' || l.name === 'breadthfirst';
     return h('div', {},
       field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: this.bars.legend, onchange: (e: Event) => this.showBar('legend', (e.target as HTMLInputElement).checked) }),
+        'Show legend and stats'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: this.bars.hints, onchange: (e: Event) => this.showBar('hints', (e.target as HTMLInputElement).checked) }),
+        'Show keyboard shortcuts'),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
       slider(l.name === 'hierarchy' ? 'Level distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },

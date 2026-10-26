@@ -38,6 +38,9 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   *Style ▾* (colors per type, tag and connection type) and *Slices ▾* (saved views).
 - **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
+- **Bottom bars** – the legend with the stats and the shortcut bar each get a × when you point at them.
+  *Layout ▾* → "Show legend and stats" / "Show keyboard shortcuts" brings them back. The choice is
+  saved in the settings `brainmap.showLegend` and `brainmap.showShortcuts` and holds for every file.
 - **View follows the selection** (Layout ▾ → "Center view on the selected node").
 - **Layouts** – *Physics* (cytoscape-cola, neighbours follow while you drag) and *Hierarchy*
   (dagre, rounded right-angle connections) in the toolbar; more under *More…*.
