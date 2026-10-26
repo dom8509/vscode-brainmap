@@ -5,7 +5,6 @@ import { h } from './dom';
 export const CARD_HEIGHT = 64;
 /** Below this zoom cards collapse to colored blocks and groups show big names. */
 const LOD_ZOOM = 0.45;
-const MAX_TAGS = 2;
 
 const ICONS: Record<string, string> = {
   app: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
@@ -134,8 +133,8 @@ export class CardLayer {
 
   private updateContent(card: Card, n: NodeSingular) {
     const d = n.data();
-    const tags: string[] = d.tags ?? [];
-    const sig = [d.label, d.type, d.typeName, d.color, d.width, tags.join(',')].join('|');
+    // Tags stay off the card to keep it calm; the hover card and details show them.
+    const sig = [d.label, d.type, d.typeName, d.color, d.width].join('|');
     if (sig === card.sig || this.editing === n.id()) return;
     card.sig = sig;
     const color: string = d.color;
@@ -150,11 +149,7 @@ export class CardLayer {
       tile,
       h('span', { class: 'card-text' },
         card.label,
-        h('span', { class: 'card-meta' },
-          d.typeName && h('span', { class: 'card-type' }, d.typeName),
-          tags.slice(0, MAX_TAGS).map((t) => h('span', { class: 'card-chip' }, t)),
-          tags.length > MAX_TAGS && h('span', { class: 'card-chip' }, `+${tags.length - MAX_TAGS}`),
-        ),
+        d.typeName && h('span', { class: 'card-meta' }, h('span', { class: 'card-type' }, d.typeName)),
       ),
     );
   }

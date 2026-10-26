@@ -8,7 +8,8 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 
 ## Features
 
-- **Cards** – every node is a card with an icon (picked from its type name), its type and tags.
+- **Cards** – every node is a card with an icon (picked from its type name) and its type.
+  Tags stay off the card; the hover card and the details show them.
 - **Groups** – soft colored areas around nodes of the same type (`G` or the *Groups* button).
 - **Focus** – select a node: everything else fades and its connections flow (`F` or *Focus*).
 - **Zoom out** – cards turn into colored blocks and groups show big names. A minimap sits in the corner.

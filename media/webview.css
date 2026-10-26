@@ -403,14 +403,6 @@ button:disabled {
   font-size: 11px;
   color: var(--bm-muted);
 }
-.card-chip {
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bm-fg) 8%, transparent);
-  color: color-mix(in srgb, var(--bm-fg) 80%, transparent);
-}
 .card-input {
   pointer-events: auto;
   width: 100%;
