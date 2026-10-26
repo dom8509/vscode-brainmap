@@ -1,0 +1,57 @@
+title: Example architecture
+version: 1
+settings:
+  layout:
+    name: hierarchy
+    hierarchyEdgeTypes: [depends-on]
+    direction: TB
+    nodeSpacing: 40
+    edgeLength: 90
+  style:
+    colorBy: type
+    nodeTypes:
+      app: { color: '#4e79a7', shape: round-rectangle }
+      service: { color: '#59a14f', shape: round-rectangle }
+      database: { color: '#f28e2b', shape: hexagon, size: 50 }
+      library: { color: '#b07aa1', shape: ellipse }
+    tags:
+      critical: { color: '#e15759' }
+      legacy: { color: '#9c755f' }
+    edgeTypes:
+      depends-on: { color: '#76b7b2', length: 120 }
+      calls: { color: '#edc948', lineStyle: dashed, length: 200 }
+      part-of: { color: '#bab0ac', lineStyle: dotted, length: 60 }
+  slices:
+    - name: Backend only
+      nodeTypes: [service, database]
+    - name: Critical
+      tags: [critical]
+    - name: Web app dependencies
+      roots: [web]
+      edgeTypes: [depends-on]
+      direction: downstream
+nodes:
+  - { id: web, label: Web App, type: app, tags: [critical] }
+  - { id: mobile, label: Mobile App, type: app }
+  - { id: gateway, label: API Gateway, type: service, tags: [critical] }
+  - { id: auth, label: Auth Service, type: service, tags: [critical] }
+  - { id: orders, label: Order Service, type: service }
+  - { id: billing, label: Billing Service, type: service, tags: [legacy] }
+  - { id: usersdb, label: Users DB, type: database, tags: [critical] }
+  - { id: ordersdb, label: Orders DB, type: database }
+  - { id: ui, label: UI Kit, type: library }
+  - { id: http, label: HTTP Client, type: library }
+edges:
+  - { source: web, target: gateway, type: depends-on }
+  - { source: mobile, target: gateway, type: depends-on }
+  - { source: web, target: ui, type: depends-on }
+  - { source: mobile, target: ui, type: depends-on }
+  - { source: gateway, target: auth, type: depends-on }
+  - { source: gateway, target: orders, type: depends-on }
+  - { source: orders, target: billing, type: calls, label: invoice }
+  - { source: auth, target: usersdb, type: depends-on }
+  - { source: orders, target: ordersdb, type: depends-on }
+  - { source: billing, target: ordersdb, type: depends-on }
+  - { source: ui, target: web, type: part-of }
+  - { source: http, target: gateway, type: part-of }
+  - { source: web, target: http, type: depends-on }
