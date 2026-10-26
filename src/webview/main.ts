@@ -19,7 +19,8 @@ import { HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
-import { ContextMenu, FloatingWindow, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
+import { ContextMenu, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
+import { Point, Popover, barButton, below, colorSwatches, tagPicker, typeList } from './panels';
 
 const vscode = acquireVsCodeApi();
 const post = (msg: WebviewMessage) => vscode.postMessage(msg);
@@ -27,9 +28,7 @@ const post = (msg: WebviewMessage) => vscode.postMessage(msg);
 type Tab = 'style' | 'layout' | 'slices';
 
 interface UiState {
-  tab?: Tab;
-  panelOpen?: boolean;
-  popup?: Position;
+  details?: boolean;
   edgeType?: string;
   focus?: boolean;
   groups?: boolean;
@@ -85,7 +84,19 @@ const ICON = {
   settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  tag: '<path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16"/>',
+  connect: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8 16c4 0 4-8 8-8"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
+  details: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  type: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  slice: '<path d="M4 6h16M7 12h10M10 18h4"/>',
 };
+
+/** How long the mouse rests on a node before its hover card shows. */
+const HOVER_DELAY = 500;
 
 function svgIcon(paths: string, size = 16): SVGElement {
   const wrap = document.createElement('span');
@@ -115,8 +126,10 @@ class App {
   fileName = '';
   selection: string[] = [];
   ui: UiState = vscode.getState<UiState>() ?? {};
-  tab: Tab = this.ui.tab ?? 'layout';
-  panelOpen = this.ui.panelOpen ?? false;
+  /** The details sidebar on the right. */
+  detailsOpen = this.ui.details ?? false;
+  /** The open Layout / Style / Slices menu from the toolbar. */
+  settings?: { kind: Tab; pop: Popover };
   loaded = false;
   /** Dependency type used for new edges: the last one the user picked. */
   edgeType = this.ui.edgeType ?? '';
@@ -135,21 +148,23 @@ class App {
   private legend = h('div', { class: 'legend floating-bar' });
   private hints = h('div', { class: 'hints floating-bar' });
   private dropChips = h('div', { class: 'drop-chips hidden' });
+  private minibar = h('div', { class: 'minibar hidden' });
+  private hovercard = h('div', { class: 'hovercard hidden' });
+  private hoverTimer?: number;
   private menu: ContextMenu;
-  private popup: FloatingWindow;
   private postTimer?: number;
   private placeFrame = 0;
 
   constructor(root: HTMLElement) {
     const canvas = h('div', { class: 'canvas' });
-    this.stage.append(canvas, this.empty, this.legend, this.hints, this.dropChips, this.error);
+    this.stage.append(canvas, this.empty, this.legend, this.hints, this.dropChips, this.minibar, this.hovercard, this.error);
     root.append(this.toolbar, h('div', { class: 'main' }, this.stage, this.panel));
     this.menu = new ContextMenu(document.body);
     this.graph = new GraphView(canvas, {
       onSelect: (ids) => {
         this.selection = ids;
-        this.renderPopup();
-        this.renderToolbar();
+        Popover.current?.close();
+        this.renderSelectionUi();
       },
       onBackgroundDoubleClick: (pos) => this.addNode(pos),
       onNodeDoubleClick: (id) => this.editInline(id),
@@ -157,10 +172,12 @@ class App {
       onViewport: () => {
         cancelAnimationFrame(this.placeFrame);
         this.placeFrame = requestAnimationFrame(() => {
-          this.placePopup();
+          this.placeMiniBar();
           this.placeDropChips();
+          this.placeHoverCard();
         });
       },
+      onHover: (id) => this.hover(id),
       onDropHover: (source, target) => {
         this.dropping = target ? { source, target } : undefined;
         this.renderDropChips();
@@ -170,12 +187,6 @@ class App {
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
-    this.popup = new FloatingWindow(
-      this.stage,
-      this.ui.popup,
-      (pos) => this.saveUi({ popup: pos }),
-      () => this.graph.select([]),
-    );
     this.renderEmpty();
     this.renderHints();
 
@@ -220,10 +231,9 @@ class App {
       this.graph.runLayout(this.map, { fit: false });
     }
     this.selection = this.selection.filter((id) => this.graph.cy.getElementById(id).nonempty());
-    this.renderPanel();
+    this.renderSettings();
     this.renderOverlays();
-    // Don't rebuild the popup under the user's cursor while they are typing in it.
-    if (!this.popup.el.contains(document.activeElement)) this.renderPopup();
+    this.renderSelectionUi();
   }
 
   /** Sends the model to the extension host (debounced) which writes it to the file. */
@@ -239,9 +249,9 @@ class App {
     // New or removed nodes/connections re-run the layout so the graph stays arranged.
     if (this.structureChanged() || opts.relayout) this.graph.runLayout(this.map, { fit: opts.fit ?? false });
     this.renderToolbar();
-    if (opts.panel !== false) this.renderPanel();
-    if (opts.popup) this.renderPopup();
-    else this.placePopup();
+    if (opts.panel !== false) this.renderSettings();
+    if (opts.popup) this.detailsKey = '';
+    this.renderSelectionUi();
     this.renderOverlays();
     this.save();
   }
@@ -354,7 +364,7 @@ class App {
         if (q.type) node.type = q.type;
         if (q.tags.length) node.tags = [...new Set([...(node.tags ?? []), ...q.tags])];
         this.commit({ popup: true });
-      } else if (isNew) this.renderPopup();
+      } else if (isNew) this.renderSelectionUi();
       if (via === 'tab') this.addChild(id);
     });
   }
@@ -417,7 +427,7 @@ class App {
     if (!id || id === node.id) return;
     if (this.node(id)) {
       post({ type: 'notify', level: 'error', message: `A node with id "${id}" already exists.` });
-      this.renderPopup();
+      this.renderSelectionUi();
       return;
     }
     const old = node.id;
@@ -452,55 +462,125 @@ class App {
 
   // ---------------------------------------------------------------- context menu & keys
 
+  /** Right-click: every action, with words and shortcuts. The mini bar only repeats the most used ones. */
   private openMenu(target: { kind: 'node' | 'edge' | 'background'; id?: string }, at: Position, pos: Position) {
+    this.hover(undefined);
+    Popover.current?.close();
     const items: MenuItem[] = [];
-    if (target.kind === 'node' && target.id) {
-      const id = target.id;
+    const selNodes = this.selection.filter((s) => this.node(s));
+    if (target.kind === 'node' && target.id && selNodes.length > 2 && selNodes.includes(target.id)) {
+      const nodes = selNodes.map((id) => this.node(id)!);
       items.push(
-        { label: 'Add child', hint: 'Tab', action: () => this.addChild(id) },
-        { label: 'Add sibling', hint: 'Enter', action: () => this.addSibling(id) },
-        { label: 'Connect with node…', hint: 'C', action: () => this.connectWithPicker(id, at) },
+        { label: `Set type for all ${nodes.length}`, hint: '▸', action: () => this.openTypePopover(at, nodes) },
+        { label: 'Add tag to all', hint: '▸', action: () => this.openTagPopover(at, nodes) },
+        { label: 'Save as slice', action: () => this.sliceFrom(selNodes, 'Selection', 'both', 0) },
+        'separator',
+        { label: 'Delete all…', hint: '⌫', danger: true, action: () => this.requestDelete(this.selection) },
       );
-      const selectedNodes = this.selection.filter((s) => this.node(s));
-      if (selectedNodes.length === 2 && selectedNodes.includes(id)) {
-        const other = selectedNodes.find((s) => s !== id)!;
-        const [a, b] = [nameOf(this.node(other)), nameOf(this.node(id))];
+    } else if (target.kind === 'node' && target.id) {
+      const id = target.id;
+      const node = this.node(id)!;
+      if (selNodes.length === 2 && selNodes.includes(id)) {
+        const other = selNodes.find((s) => s !== id)!;
+        const [a, b] = [nameOf(this.node(other)), nameOf(node)];
         items.push(
-          'separator',
           { label: `Connect ${a} → ${b}`, action: () => this.connect(other, id, true) },
           { label: `Connect ${b} → ${a}`, action: () => this.connect(id, other, true) },
           { label: `Connect ${a} ↔ ${b}`, action: () => this.connect(other, id, false) },
+          'separator',
         );
       }
       items.push(
+        { label: 'Add child', hint: 'Tab', action: () => this.addChild(id) },
+        { label: 'Add sibling', hint: 'Enter', action: () => this.addSibling(id) },
+        { label: 'Connect with…', hint: 'C', action: () => this.connectWithPicker(id, at) },
         'separator',
         { label: 'Rename', hint: 'F2', action: () => this.editInline(id) },
+        { label: 'Type', hint: '▸', action: () => this.openTypePopover(at, [node]) },
+        { label: 'Color', hint: '▸', action: () => this.openColorPopover(at, node) },
+        { label: 'Tags', hint: '▸', action: () => this.openTagPopover(at, [node]) },
+        'separator',
+        { label: 'Focus on this', action: () => {
+          if (!this.graph.focus) this.toggleFocus();
+          this.graph.select([id]);
+        } },
+        { label: 'Select neighbours', action: () => this.graph.select(this.graph.cy.getElementById(id).closedNeighborhood().nodes().map((n) => n.id())) },
         { label: 'Slice from here', action: () => this.sliceFrom([id]) },
         'separator',
-        { label: 'Delete node…', hint: '⌫', danger: true, action: () => this.requestDelete([id]) },
+        { label: 'Duplicate', action: () => this.duplicate(id) },
+        { label: 'Copy id', action: () => this.copyText(id) },
+        { label: 'Open details', hint: 'D', action: () => {
+          this.graph.select([id]);
+          this.toggleDetails(true);
+        } },
+        'separator',
+        { label: 'Delete…', hint: '⌫', danger: true, action: () => this.requestDelete([id]) },
       );
     } else if (target.kind === 'edge' && target.id) {
       const e = this.edge(target.id);
       if (!e) return;
-      const bidirectional = e.directed === false;
+      const two = e.directed === false;
       items.push(
-        { label: 'Edit', action: () => this.graph.select([e.id]) },
-        bidirectional
+        { label: 'Type', hint: '▸', action: () => this.openEdgeTypePopover(at, e) },
+        { label: 'Tags', hint: '▸', action: () => this.openTagPopover(at, [e]) },
+        'separator',
+        two
           ? { label: 'Make one-way →', action: () => { e.directed = undefined; this.commit({ popup: true }); } }
           : { label: 'Make two-way ↔', action: () => { e.directed = false; this.commit({ popup: true }); } },
-        ...(!bidirectional ? [{ label: 'Reverse direction ⇄', action: () => this.reverse(e) }] : []),
+        ...(!two ? [{ label: 'Reverse', action: () => this.reverse(e) }] : []),
+        { label: 'Edit label', action: () => this.editEdgeLabel(e.id) },
+        { label: 'Open details', hint: 'D', action: () => {
+          this.graph.select([e.id]);
+          this.toggleDetails(true);
+        } },
         'separator',
-        { label: 'Delete connection…', hint: '⌫', danger: true, action: () => this.requestDelete([e.id]) },
+        { label: 'Delete…', hint: '⌫', danger: true, action: () => this.requestDelete([e.id]) },
       );
     } else {
       items.push(
-        { label: 'Add node here', action: () => this.addNode(pos) },
+        { label: 'Add node here', hint: 'dbl-click', action: () => this.addNode(pos) },
         'separator',
         { label: 'Fit view', hint: '⇧F', action: () => this.graph.fit() },
         { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map) },
+        { label: this.cards.groups ? 'Hide groups' : 'Show groups', hint: 'G', action: () => this.toggleGroups() },
+        { label: this.graph.focus ? 'Focus off' : 'Focus on', hint: 'F', action: () => this.toggleFocus() },
+        'separator',
+        { label: 'Save view as slice', action: () => this.saveViewAsSlice() },
       );
     }
     this.menu.show(items, at);
+  }
+
+  private duplicate(id: string) {
+    const n = this.node(id);
+    if (!n) return;
+    const copy: BrainNode = { ...clone(n), id: newId('n', this.map.nodes.map((x) => x.id)), label: `${nameOf(n)} copy` };
+    const p = this.graph.cy.getElementById(id).position();
+    this.graph.placeAt(copy.id, { x: p.x + 40, y: p.y + 100 });
+    this.map.nodes.push(copy);
+    this.commit();
+    this.graph.select([copy.id]);
+  }
+
+  private copyText(text: string) {
+    navigator.clipboard?.writeText(text).then(
+      () => post({ type: 'notify', level: 'info', message: `Copied "${text}"` }),
+      () => post({ type: 'notify', level: 'error', message: 'Could not copy to the clipboard.' }),
+    );
+  }
+
+  private editEdgeLabel(id: string) {
+    this.graph.select([id]);
+    this.toggleDetails(true);
+    window.setTimeout(() => (this.panel.querySelector('input[name=edge-label]') as HTMLInputElement | null)?.focus(), 50);
+  }
+
+  /** The selected nodes and their neighbours, or a new slice to fill in. */
+  private saveViewAsSlice() {
+    const nodes = this.selection.filter((id) => this.node(id));
+    if (nodes.length) return this.sliceFrom(nodes, 'Selection', 'both', 1);
+    this.editingSlice = { name: newId('Slice ', (this.map.settings.slices ?? []).map((s) => s.name)) };
+    this.openSettings('slices');
   }
 
   private reverse(e: BrainEdge) {
@@ -554,6 +634,20 @@ class App {
       case 'F2':
         if (!one) return;
         this.editInline(one);
+        break;
+      case '#':
+      case 't': {
+        const target = one ? this.node(one) : this.selectedEdge();
+        if (!target) return;
+        const btn = this.minibar.querySelector(e.key === '#' ? '[aria-label="Add tag"]' : '[aria-label="Change type"]');
+        const at = btn ? below(btn) : { x: 200, y: 200 };
+        if (e.key === '#') this.openTagPopover(at, [target], btn as HTMLElement);
+        else if (one) this.openTypePopover(at, [target as BrainNode], btn as HTMLElement);
+        else this.openEdgeTypePopover(at, target as BrainEdge, btn as HTMLElement);
+        break;
+      }
+      case 'd':
+        this.toggleDetails();
         break;
       case 'c': {
         if (!one) return;
@@ -619,50 +713,257 @@ class App {
     this.dropChips.style.top = `${box.y2 + 10}px`;
   }
 
-  // ---------------------------------------------------------------- floating editor
+  // ---------------------------------------------------------------- selection: mini bar, hover card, details
 
-  private placePopup() {
-    if (!this.popup.visible) return;
-    if (this.selection.length === 1) {
-      const box = this.graph.renderedBox(this.selection[0]);
-      if (!box) return this.popup.hide();
-      this.popup.place(box);
-    } else {
-      const boxes = this.selection.map((id) => this.graph.renderedBox(id)).filter((b) => !!b);
-      if (!boxes.length) return this.popup.hide();
-      this.popup.place({
-        x1: Math.min(...boxes.map((b) => b!.x1)),
-        x2: Math.max(...boxes.map((b) => b!.x2)),
-        y1: Math.min(...boxes.map((b) => b!.y1)),
-        y2: Math.max(...boxes.map((b) => b!.y2)),
-      });
-    }
+  /** Re-renders everything that depends on the selection. */
+  private renderSelectionUi() {
+    this.renderMiniBar();
+    this.renderDetails();
   }
 
-  private renderPopup() {
+  private selectedNode() {
+    return this.selection.length === 1 ? this.node(this.selection[0]) : undefined;
+  }
+
+  private selectedEdge() {
+    return this.selection.length === 1 ? this.edge(this.selection[0]) : undefined;
+  }
+
+  private edgeTypeColor(type: string) {
+    return this.map.settings.style?.edgeTypes?.[type]?.color ?? autoColor(type);
+  }
+
+  /** The small bar above the selection with the most used actions. Everything else is in the right-click menu. */
+  private renderMiniBar() {
     const sel = this.selection;
-    const node = sel.length === 1 ? this.node(sel[0]) : undefined;
-    const edge = sel.length === 1 ? this.edge(sel[0]) : undefined;
-    const twoNodes = sel.length === 2 && sel.every((id) => this.node(id));
+    const node = this.selectedNode();
+    const edge = this.selectedEdge();
+    const nodes = sel.map((id) => this.node(id)).filter((n): n is BrainNode => !!n);
+    const icon = (k: keyof typeof ICON) => svgIcon(ICON[k], 16);
+    const sep = () => h('span', { class: 'bar-sep' });
+    const typeButton = (type: string | undefined, color: string, onclick: (b: HTMLElement) => void) => {
+      const b: HTMLButtonElement = h('button', { class: 'bar-type tipped', 'aria-label': 'Change type' },
+        h('span', { class: 'dot', style: { background: color } }),
+        type ?? 'No type',
+        svgIcon(ICON.chevron, 10),
+        h('span', { class: 'tip' }, 'Change type', kbd('T')),
+      );
+      b.onclick = () => onclick(b);
+      return b;
+    };
+    let content: Node[] = [];
     if (node) {
-      const count = this.map.edges.filter((e) => e.source === node.id || e.target === node.id).length;
-      this.popup.show(`Node · ${count} connection${count === 1 ? '' : 's'}`, this.nodeEditor(node), resolveNodeStyle(this.map, node).color);
-    } else if (edge) this.popup.show('Connection', this.edgeEditor(edge), resolveEdgeStyle(this.map, edge).color);
-    else if (twoNodes)
-      this.popup.show('2 nodes selected', [
-        h('p', { class: 'muted small' }, 'Connect them, or right-click one of them for more.'),
-        h('div', { class: 'row' },
-          h('button', { class: 'btn', onclick: () => this.connect(sel[0], sel[1], true) }, `${nameOf(this.node(sel[0]))} → ${nameOf(this.node(sel[1]))}`),
-          h('button', { class: 'btn', title: 'Both ways', onclick: () => this.connect(sel[0], sel[1], false) }, '↔'),
-        ),
-      ]);
-    else if (sel.length > 1)
-      this.popup.show(`${sel.length} selected`, [
-        h('div', { class: 'row' }, h('button', { class: 'btn danger', onclick: () => this.requestDelete(sel) }, 'Delete all…')),
-      ]);
-    else this.popup.hide();
-    // Wait a frame so the centering animation has started before measuring.
-    requestAnimationFrame(() => this.placePopup());
+      content = [
+        typeButton(node.type, node.type ? this.nodeTypeColor(node.type) : 'var(--bm-muted)', (b) => this.openTypePopover(below(b), [node], b)),
+        sep(),
+        barButton(icon('tag'), 'Add tag', '#', (e) => this.openTagPopover(below(e.currentTarget as Element), [node], e.currentTarget as HTMLElement)),
+        barButton(h('span', { class: 'color-dot', style: { background: resolveNodeStyle(this.map, node).color } }), 'Color', undefined,
+          (e) => this.openColorPopover(below(e.currentTarget as Element), node, e.currentTarget as HTMLElement)),
+        barButton(icon('plus'), 'Add child', 'Tab', () => this.addChild(node.id)),
+        barButton(icon('connect'), 'Connect with…', 'C', (e) => this.connectWithPicker(node.id, below(e.currentTarget as Element))),
+        barButton(icon('trash'), 'Delete', '⌫', () => this.requestDelete([node.id]), 'danger'),
+        barButton(icon('more'), 'Details', 'D', () => this.toggleDetails(true)),
+      ];
+    } else if (edge) {
+      const two = edge.directed === false;
+      content = [
+        typeButton(edge.type, edge.type ? this.edgeTypeColor(edge.type) : 'var(--bm-muted)', (b) => this.openEdgeTypePopover(below(b), edge, b)),
+        sep(),
+        barButton(icon('tag'), 'Add tag', '#', (e) => this.openTagPopover(below(e.currentTarget as Element), [edge], e.currentTarget as HTMLElement)),
+        barButton(h('span', { class: 'bar-text' }, two ? '↔' : '→'), two ? 'Make one-way' : 'Make two-way', undefined, () => {
+          edge.directed = two ? undefined : false;
+          this.commit({ popup: true });
+        }),
+        !two && barButton(icon('swap'), 'Reverse', undefined, () => this.reverse(edge)),
+        barButton(icon('trash'), 'Delete', '⌫', () => this.requestDelete([edge.id]), 'danger'),
+        barButton(icon('more'), 'Details', 'D', () => this.toggleDetails(true)),
+      ].filter((x): x is HTMLButtonElement => !!x);
+    } else if (nodes.length === 2 && sel.length === 2) {
+      const [a, b] = nodes;
+      content = [
+        h('span', { class: 'bar-label' }, '2 nodes'),
+        sep(),
+        barButton(h('span', { class: 'bar-text' }, `${nameOf(a)} → ${nameOf(b)}`), 'Connect one-way', undefined, () => this.connect(a.id, b.id, true), 'wide'),
+        barButton(h('span', { class: 'bar-text' }, '↔'), 'Connect both ways', undefined, () => this.connect(a.id, b.id, false)),
+        barButton(icon('trash'), 'Delete both', '⌫', () => this.requestDelete(sel), 'danger'),
+      ];
+    } else if (sel.length > 1) {
+      content = [
+        h('span', { class: 'bar-label' }, `${sel.length} selected`),
+        sep(),
+        nodes.length > 0 && barButton(icon('type'), 'Set type for all', undefined, (e) => this.openTypePopover(below(e.currentTarget as Element), nodes, e.currentTarget as HTMLElement)),
+        nodes.length > 0 && barButton(icon('tag'), 'Add tag to all', undefined, (e) => this.openTagPopover(below(e.currentTarget as Element), nodes, e.currentTarget as HTMLElement)),
+        nodes.length > 0 && barButton(icon('slice'), 'Save as slice', undefined, () => this.sliceFrom(nodes.map((n) => n.id), 'Selection', 'both', 0)),
+        barButton(icon('trash'), 'Delete all', '⌫', () => this.requestDelete(sel), 'danger'),
+      ].filter((x): x is HTMLElement => !!x);
+    }
+    this.minibar.replaceChildren(...content);
+    this.minibar.classList.toggle('hidden', content.length === 0);
+    requestAnimationFrame(() => this.placeMiniBar());
+  }
+
+  private placeMiniBar() {
+    if (this.minibar.classList.contains('hidden')) return;
+    const boxes = this.selection.map((id) => this.graph.renderedBox(id)).filter((b): b is NonNullable<typeof b> => !!b);
+    if (!boxes.length) {
+      this.minibar.style.visibility = 'hidden';
+      return;
+    }
+    this.minibar.style.visibility = '';
+    const x1 = Math.min(...boxes.map((b) => b.x1));
+    const x2 = Math.max(...boxes.map((b) => b.x2));
+    const y1 = Math.min(...boxes.map((b) => b.y1));
+    const y2 = Math.max(...boxes.map((b) => b.y2));
+    const w = this.minibar.offsetWidth;
+    const hgt = this.minibar.offsetHeight;
+    let y = y1 - hgt - 12;
+    if (y < 8) y = y2 + 12;
+    const x = Math.max(8, Math.min((x1 + x2) / 2 - w / 2, this.stage.clientWidth - w - 8));
+    this.minibar.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  private openTypePopover(at: Point, nodes: BrainNode[], owner?: HTMLElement) {
+    const types = uniqueTypes(this.map).nodeTypes;
+    const current = nodes.length === 1 ? nodes[0].type : undefined;
+    const pop = new Popover(at, typeList({
+      types, current, colorOf: (t) => this.nodeTypeColor(t), listId: 'dl-node-types',
+      onPick: (t) => {
+        nodes.forEach((n) => (n.type = t));
+        pop.close();
+        this.commit({ popup: true });
+      },
+    }), { owner, className: 'pop-narrow' });
+  }
+
+  private openEdgeTypePopover(at: Point, edge: BrainEdge, owner?: HTMLElement) {
+    const pop = new Popover(at, typeList({
+      types: uniqueTypes(this.map).edgeTypes, current: edge.type, colorOf: (t) => this.edgeTypeColor(t), listId: 'dl-edge-types',
+      onPick: (t) => {
+        edge.type = t;
+        if (t) {
+          this.edgeType = t;
+          this.saveUi({ edgeType: t });
+        }
+        pop.close();
+        this.commit({ popup: true });
+      },
+    }), { owner, className: 'pop-narrow' });
+  }
+
+  /** Tag field with suggestions. With several targets, new tags are added to all of them. */
+  private openTagPopover(at: Point, targets: (BrainNode | BrainEdge)[], owner?: HTMLElement) {
+    const single = targets.length === 1 ? targets[0] : undefined;
+    new Popover(at, [tagPicker({
+      current: single?.tags ?? [],
+      known: uniqueTypes(this.map).tags,
+      onChange: (tags) => {
+        if (single) single.tags = tags.length ? tags : undefined;
+        else targets.forEach((t) => (t.tags = [...new Set([...(t.tags ?? []), ...tags])]));
+        this.commit({ panel: false });
+      },
+    })], { owner, className: 'pop-narrow' });
+  }
+
+  private openColorPopover(at: Point, node: BrainNode, owner?: HTMLElement) {
+    const pop = new Popover(at, colorSwatches(node.color, (c) => {
+      node.color = c;
+      pop.close();
+      this.commit({ panel: false });
+    }), { owner, className: 'pop-narrow' });
+  }
+
+  // Hover card: read only, shows what does not fit on the card.
+
+  private hovered?: string;
+
+  private hover(id: string | undefined) {
+    window.clearTimeout(this.hoverTimer);
+    if (!id) {
+      this.hovered = undefined;
+      this.hovercard.classList.add('hidden');
+      return;
+    }
+    this.hoverTimer = window.setTimeout(() => {
+      if (this.menu.open || Popover.current || document.querySelector('.card-input')) return;
+      this.hovered = id;
+      this.renderHoverCard();
+    }, HOVER_DELAY);
+  }
+
+  private renderHoverCard() {
+    const n = this.hovered ? this.node(this.hovered) : undefined;
+    if (!n) return this.hovercard.classList.add('hidden');
+    const ins = this.map.edges.filter((e) => e.target === n.id);
+    const outs = this.map.edges.filter((e) => e.source === n.id);
+    const counts = new Map<string, number>();
+    [...ins, ...outs].forEach((e) => e.type && counts.set(e.type, (counts.get(e.type) ?? 0) + 1));
+    this.hovercard.replaceChildren(
+      h('div', { class: 'hc-head' },
+        h('span', { class: 'dot', style: { background: resolveNodeStyle(this.map, n).color } }),
+        h('b', {}, nameOf(n)),
+        n.type && h('span', { class: 'muted small' }, n.type),
+      ),
+      n.description ? h('div', { class: 'hc-desc' }, n.description) : h('div', { class: 'hc-desc muted' }, 'No description'),
+      h('div', { class: 'hc-tags' }, (n.tags ?? []).map((t) => h('span', { class: 'chip' }, t))),
+      h('div', { class: 'hc-foot' },
+        h('span', {}, `${ins.length} in · ${outs.length} out`),
+        h('span', {}, [...counts].map(([t, c]) => `${t} ×${c}`).join(' · ')),
+      ),
+    );
+    this.hovercard.classList.remove('hidden');
+    this.placeHoverCard();
+  }
+
+  private placeHoverCard() {
+    if (this.hovercard.classList.contains('hidden') || !this.hovered) return;
+    const box = this.graph.renderedBox(this.hovered);
+    if (!box) return this.hovercard.classList.add('hidden');
+    const w = this.hovercard.offsetWidth;
+    const hgt = this.hovercard.offsetHeight;
+    let x = box.x2 + 14;
+    if (x + w > this.stage.clientWidth - 8) x = box.x1 - w - 14;
+    const y = Math.max(8, Math.min(box.y1 - 4, this.stage.clientHeight - hgt - 8));
+    this.hovercard.style.transform = `translate(${Math.max(8, x)}px, ${y}px)`;
+  }
+
+  // Details sidebar: everything about the selection, including the rarely used fields.
+
+  private detailsKey = '';
+
+  private toggleDetails(open = !this.detailsOpen) {
+    this.detailsOpen = open;
+    this.saveUi({ details: open });
+    this.detailsKey = '';
+    this.renderDetails();
+    this.renderToolbar();
+    requestAnimationFrame(() => {
+      this.graph.cy.resize();
+      this.placeMiniBar();
+    });
+  }
+
+  private renderDetails() {
+    this.panel.classList.toggle('hidden', !this.detailsOpen);
+    if (!this.detailsOpen) return;
+    const key = this.selection.join(',');
+    // Don't rebuild the form under the cursor while the user is typing in it.
+    if (key === this.detailsKey && this.panel.contains(document.activeElement)) return;
+    this.detailsKey = key;
+    const node = this.selectedNode();
+    const edge = this.selectedEdge();
+    const color = node ? resolveNodeStyle(this.map, node).color : edge ? resolveEdgeStyle(this.map, edge).color : 'var(--bm-accent)';
+    const title = node ? nameOf(node) : edge ? 'Connection' : this.selection.length ? `${this.selection.length} selected` : 'Details';
+    const body = node ? this.nodeDetails(node) : edge ? this.edgeDetails(edge) : this.selection.length
+      ? [h('div', { class: 'actions' }, h('button', { class: 'btn danger', onclick: () => this.requestDelete(this.selection) }, svgIcon(ICON.trash, 15), ' Delete all…'))]
+      : [h('p', { class: 'muted' }, 'Select a node or a connection. Its details show up here: description, id, colors and all connections.')];
+    this.panel.replaceChildren(
+      h('div', { class: 'details-head' },
+        h('span', { class: 'dot', style: { background: color } }),
+        h('span', { class: 'details-title' }, title),
+        h('button', { class: 'icon-btn', 'aria-label': 'Close details', title: 'Close (D)', onclick: () => this.toggleDetails(false) }, svgIcon(ICON.close, 14)),
+      ),
+      h('div', { class: 'details-body' }, ...body.filter((x): x is HTMLElement => !!x)),
+    );
   }
 
   /** Text input that writes the model on change (blur or Enter). */
@@ -673,7 +974,7 @@ class App {
       onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
       onchange: (e: Event) => {
         apply((e.target as HTMLInputElement).value);
-        this.commit({ panel: this.panelOpen });
+        this.commit({ panel: false });
       },
     });
   }
@@ -696,91 +997,79 @@ class App {
           const v = (e.target as HTMLInputElement).value.trim();
           if (e.key === 'Enter' && v) apply(v);
         },
-        onchange: (e: Event) => {
-          const v = (e.target as HTMLInputElement).value.trim();
-          if (v) apply(v);
-        },
       }),
     );
   }
 
-  private nodeEditor(node: BrainNode): (HTMLElement | false)[] {
-    const color = resolveNodeStyle(this.map, node).color;
+  private nodeDetails(node: BrainNode): (HTMLElement | false)[] {
     const types = uniqueTypes(this.map);
     const conns = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
-    const more = h('details', { class: 'more' },
-      h('summary', {}, 'More'),
-      field('Id', h('input', {
-        value: node.id,
-        onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
-        onchange: (e: Event) => this.renameNodeId(node, (e.target as HTMLInputElement).value),
-      })),
-      field('Color', h('div', { class: 'row' },
-        h('input', { type: 'color', value: color, onchange: (e: Event) => { node.color = (e.target as HTMLInputElement).value; this.commit({ panel: false }); } }),
-        node.color
-          ? h('button', { class: 'btn', onclick: () => { node.color = undefined; this.commit({ panel: false, popup: true }); } }, 'use type/tag color')
-          : h('span', { class: 'muted small' }, 'from type/tag'),
-      )),
-      field('Description', h('textarea', { rows: 3, value: node.description ?? '',
-        onchange: (e: Event) => { node.description = (e.target as HTMLTextAreaElement).value || undefined; this.commit({ panel: false }); } })),
-    );
     return [
-      field('Name', this.input(node.label, (v) => (node.label = v), { name: 'label', class: 'name-input' })),
+      field('Name', this.input(node.label, (v) => (node.label = v), { class: 'name-input' })),
       field('Type', this.typePicker(node.type, types.nodeTypes, (t) => this.nodeTypeColor(t), 'dl-node-types', (t) => {
         node.type = t;
+        this.detailsKey = '';
         this.commit({ popup: true });
       })),
       field('Tags', tagEditor(node.tags ?? [], (tags) => {
         node.tags = tags.length ? tags : undefined;
-        this.commit({ panel: this.panelOpen });
+        this.commit({ panel: false });
       }, 'dl-tags')),
-      conns.length > 0 && h('div', { class: 'conns' },
-        conns.map((e) => {
-          const other = e.source === node.id ? e.target : e.source;
-          const st = resolveEdgeStyle(this.map, e);
-          return h('button', { class: 'conn', onclick: () => this.graph.select([other]) },
-            h('span', { class: 'conn-arrow' }, e.directed === false ? '↔' : e.source === node.id ? '→' : '←'),
-            h('span', { class: 'conn-name' }, nameOf(this.node(other))),
-            e.type && h('span', { class: 'conn-type', style: { color: st.color } }, e.type),
-          );
-        }),
-      ),
-      more,
-      h('div', { class: 'actions' },
-        h('button', { class: 'btn primary grow', title: 'Add a child node (Tab)', onclick: () => this.addChild(node.id) }, '+ Child ', kbd('Tab')),
-        h('button', { class: 'btn grow', title: 'Connect with an existing node (C)', onclick: (e: MouseEvent) => this.connectWithPicker(node.id, { x: e.clientX, y: e.clientY }) }, 'Connect… ', kbd('C')),
-        h('button', { class: 'btn icon-btn danger', 'aria-label': 'Delete node', title: 'Delete (Backspace)', onclick: () => this.requestDelete([node.id]) }, svgIcon(ICON.trash, 15)),
+      field('Description', h('textarea', { rows: 5, value: node.description ?? '', placeholder: 'What is this?',
+        onchange: (e: Event) => { node.description = (e.target as HTMLTextAreaElement).value || undefined; this.commit({ panel: false }); } })),
+      field('Color', h('div', { class: 'swatch-field' }, ...colorSwatches(node.color, (c) => {
+        node.color = c;
+        this.detailsKey = '';
+        this.commit({ popup: true });
+      }))),
+      field('Id', h('input', {
+        value: node.id, class: 'mono',
+        onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
+        onchange: (e: Event) => this.renameNodeId(node, (e.target as HTMLInputElement).value),
+      })),
+      h('div', { class: 'field' },
+        h('span', {}, `Connections · ${conns.length}`),
+        conns.length
+          ? h('div', { class: 'conns' },
+              conns.map((e) => {
+                const other = e.source === node.id ? e.target : e.source;
+                return h('button', { class: 'conn', onclick: () => this.graph.select([other]) },
+                  h('span', { class: 'conn-arrow' }, e.directed === false ? '↔' : e.source === node.id ? '→' : '←'),
+                  h('span', { class: 'conn-name' }, nameOf(this.node(other))),
+                  e.type && h('span', { class: 'conn-type', style: { color: this.edgeTypeColor(e.type) } }, e.type),
+                );
+              }))
+          : h('span', { class: 'muted small' }, 'None yet. Drag this node onto another one, or press C.'),
       ),
     ];
   }
 
-  private edgeEditor(edge: BrainEdge): (HTMLElement | false)[] {
-    const bidirectional = edge.directed === false;
-    const types = uniqueTypes(this.map);
+  private edgeDetails(edge: BrainEdge): (HTMLElement | false)[] {
+    const two = edge.directed === false;
     const link = (id: string) => h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.graph.select([id]); } }, nameOf(this.node(id)));
-    const edgeColor = (t: string) => this.map.settings.style?.edgeTypes?.[t]?.color ?? autoColor(t);
     return [
-      h('div', { class: 'edge-ends' }, link(edge.source), h('span', { class: 'arrow' }, bidirectional ? '↔' : '→'), link(edge.target)),
+      h('div', { class: 'edge-ends' }, link(edge.source), h('span', { class: 'arrow' }, two ? '↔' : '→'), link(edge.target)),
       field('Direction', h('div', { class: 'segmented' },
-        h('button', { class: bidirectional ? '' : 'active', onclick: () => { edge.directed = undefined; this.commit({ panel: false, popup: true }); } }, '→ one-way'),
-        h('button', { class: bidirectional ? 'active' : '', onclick: () => { edge.directed = false; this.commit({ panel: false, popup: true }); } }, '↔ two-way'),
-        !bidirectional && h('button', { class: 'rev', title: 'Reverse direction', onclick: () => this.reverse(edge) }, '⇄'),
+        h('button', { class: two ? '' : 'active', onclick: () => { edge.directed = undefined; this.detailsKey = ''; this.commit({ popup: true }); } }, '→ one-way'),
+        h('button', { class: two ? 'active' : '', onclick: () => { edge.directed = false; this.detailsKey = ''; this.commit({ popup: true }); } }, '↔ two-way'),
+        !two && h('button', { class: 'rev', title: 'Reverse direction', onclick: () => this.reverse(edge) }, '⇄'),
       )),
-      field('Type', this.typePicker(edge.type, types.edgeTypes, edgeColor, 'dl-edge-types', (t) => {
+      field('Type', this.typePicker(edge.type, uniqueTypes(this.map).edgeTypes, (t) => this.edgeTypeColor(t), 'dl-edge-types', (t) => {
         edge.type = t;
         if (t) {
           this.edgeType = t;
           this.saveUi({ edgeType: t });
         }
+        this.detailsKey = '';
         this.commit({ popup: true });
       })),
       field('Tags', tagEditor(edge.tags ?? [], (tags) => {
         edge.tags = tags.length ? tags : undefined;
-        this.commit({ panel: this.panelOpen });
+        this.commit({ panel: false });
       }, 'dl-tags')),
-      field('Label', this.input(edge.label, (v) => (edge.label = v || undefined), { placeholder: 'optional' })),
+      field('Label', this.input(edge.label, (v) => (edge.label = v || undefined), { placeholder: 'optional', name: 'edge-label' })),
       h('div', { class: 'actions' },
-        h('button', { class: 'btn danger', title: 'Delete (Backspace)', onclick: () => this.requestDelete([edge.id]) }, svgIcon(ICON.trash, 15), ' Delete…'),
+        h('button', { class: 'btn danger', onclick: () => this.requestDelete([edge.id]) }, svgIcon(ICON.trash, 15), ' Delete…'),
       ),
     ];
   }
@@ -843,21 +1132,43 @@ class App {
     ));
   }
 
-  private renderLayoutState() {
-    this.saveUi({ panelOpen: this.panelOpen, tab: this.tab });
-    this.panel.classList.toggle('hidden', !this.panelOpen);
-    this.renderToolbar();
-    this.renderPanel();
-    requestAnimationFrame(() => {
-      this.graph.cy.resize();
-      this.placePopup();
+  // Layout, Style and Slices live in menus under the toolbar.
+
+  private openSettings(kind: Tab) {
+    const current = this.settings;
+    if (current && Popover.current === current.pop) {
+      current.pop.close();
+      if (current.kind === kind) return;
+    }
+    const btn = this.toolbar.querySelector(`[data-menu="${kind}"]`);
+    const pop = new Popover(btn ? below(btn) : { x: 200, y: 60 }, [this.settingsBody(kind)], {
+      className: 'pop-settings',
+      owner: `[data-menu="${kind}"]`,
+      onClose: () => {
+        if (this.settings?.pop === pop) this.settings = undefined;
+        this.toolbar.querySelector(`[data-menu="${kind}"]`)?.classList.remove('open');
+      },
     });
+    this.settings = { kind, pop };
+    this.toolbar.querySelector(`[data-menu="${kind}"]`)?.classList.add('open');
+  }
+
+  private settingsBody(kind: Tab): HTMLElement {
+    return kind === 'style' ? this.stylePanel() : kind === 'slices' ? this.slicePanel() : this.layoutPanel();
+  }
+
+  /** Rebuilds the open settings menu, unless the user is typing in it. */
+  private renderSettings() {
+    const s = this.settings;
+    if (!s || Popover.current !== s.pop) return;
+    const active = document.activeElement as HTMLInputElement | null;
+    if (active && s.pop.el.contains(active) && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['range', 'checkbox', 'color'].includes(active.type)))) return;
+    s.pop.set([this.settingsBody(s.kind)]);
   }
 
   private renderToolbar() {
     const types = uniqueTypes(this.map);
     const l = this.layout;
-    const slices = this.map.settings.slices ?? [];
     const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
     const searchInput = h('input', {
       type: 'search',
@@ -879,8 +1190,15 @@ class App {
     const isOther = others.some((x) => x.value === l.name);
     const toggle = (on: boolean, label: string, title: string, onclick: () => void) =>
       h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-pressed': String(on), onclick }, label);
-    const iconBtn = (icon: string, title: string, onclick: () => void, active = false) =>
-      h('button', { class: active ? 'icon-btn active' : 'icon-btn', title, 'aria-label': title, onclick }, svgIcon(icon));
+    const iconBtn = (icon: string, title: string, onclick: () => void) =>
+      h('button', { class: 'icon-btn', title, 'aria-label': title, onclick }, svgIcon(icon));
+    const menuBtn = (kind: Tab, label: string) =>
+      h('button', {
+        class: this.settings?.kind === kind && Popover.current === this.settings.pop ? 'menu-btn open' : 'menu-btn',
+        'data-menu': kind,
+        onclick: () => this.openSettings(kind),
+      }, label, svgIcon(ICON.chevron, 11));
+    const slice = this.map.settings.activeSlice;
 
     this.toolbar.replaceChildren(
       h('div', { class: 'brand' },
@@ -910,39 +1228,23 @@ class App {
             (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
             { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
           ),
-        select(
-          [{ value: '', label: 'Slice: Full graph' }, ...slices.map((s) => ({ value: s.name, label: `Slice: ${s.name}` }))],
-          this.map.settings.activeSlice ?? '',
-          (v) => this.showSlice(v),
-          { class: 'chip-select', title: 'Show a slice of the graph' },
-        ),
+      ),
+      h('div', { class: 'group' },
+        menuBtn('layout', 'Layout'),
+        menuBtn('style', 'Style'),
+        menuBtn('slices', slice ? `Slice: ${slice}` : 'Slices'),
       ),
       h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
       h('div', { class: 'group' },
         toggle(this.cards.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
         toggle(this.graph.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
         iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
-        iconBtn(ICON.relayout, 'Run layout again (L)', () => this.graph.runLayout(this.map)),
-        iconBtn(ICON.settings, 'Layout, style and slice settings', () => { this.panelOpen = !this.panelOpen; this.renderLayoutState(); }, this.panelOpen),
+        h('button', { class: this.detailsOpen ? 'toggle on' : 'toggle', title: 'Details sidebar (D)', 'aria-pressed': String(this.detailsOpen), onclick: () => this.toggleDetails() },
+          svgIcon(ICON.details, 14), ' Details'),
       ),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
       datalist('dl-tags', types.tags),
-    );
-  }
-
-  private renderPanel() {
-    this.panel.classList.toggle('hidden', !this.panelOpen);
-    if (!this.panelOpen) return;
-    const tabs: [Tab, string][] = [['layout', 'Layout'], ['style', 'Style'], ['slices', 'Slices']];
-    const body = this.tab === 'style' ? this.stylePanel() : this.tab === 'slices' ? this.slicePanel() : this.layoutPanel();
-    this.panel.replaceChildren(
-      h('div', { class: 'tabs' },
-        tabs.map(([id, label]) =>
-          h('button', { class: this.tab === id ? 'tab active' : 'tab', onclick: () => { this.tab = id; this.renderLayoutState(); } }, label),
-        ),
-      ),
-      h('div', { class: 'panel-body' }, body),
     );
   }
 
@@ -1032,17 +1334,15 @@ class App {
         h('input', { type: 'checkbox', checked: l.followSelection, onchange: (e: Event) => this.setLayout({ followSelection: (e.target as HTMLInputElement).checked }, false) }),
         'Center view on the selected node'),
       h('div', { class: 'row' },
-        h('button', { onclick: () => this.graph.runLayout(this.map) }, '↻ Run layout'),
+        h('button', { onclick: () => this.graph.runLayout(this.map) }, svgIcon(ICON.relayout, 14), 'Run layout ', kbd('L')),
+        h('button', { onclick: () => this.graph.fit() }, svgIcon(ICON.fit, 14), 'Fit view ', kbd('⇧F')),
       ),
     );
   }
 
-  private sliceFrom(roots: string[]) {
-    this.tab = 'slices';
-    this.panelOpen = true;
-    this.renderLayoutState();
-    this.editingSlice = { name: `${this.node(roots[0])?.label || roots[0]} neighbourhood`, roots, direction: 'downstream' };
-    this.renderPanel();
+  private sliceFrom(roots: string[], name?: string, direction: Slice['direction'] = 'downstream', depth?: number) {
+    this.editingSlice = { name: name ?? `${nameOf(this.node(roots[0]))} neighbourhood`, roots, direction, depth };
+    this.openSettings('slices');
   }
 
   private slicePanel(): HTMLElement {
@@ -1056,7 +1356,7 @@ class App {
           h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
           h('span', { class: 'muted small' }, describeSlice(s)),
           h('div', { class: 'row' },
-            h('button', { onclick: () => { this.editingSlice = clone(s); (this.editingSlice as any).__orig = s.name; this.renderPanel(); } }, 'Edit'),
+            h('button', { onclick: () => { this.editingSlice = clone(s); (this.editingSlice as any).__orig = s.name; this.renderSettings(); } }, 'Edit'),
             h('button', { class: 'danger', onclick: () => {
               this.map.settings.slices = slices.filter((x) => x !== s);
               if (active === s.name) this.map.settings.activeSlice = undefined;
@@ -1074,7 +1374,7 @@ class App {
       list,
       this.editingSlice
         ? this.sliceEditor(this.editingSlice)
-        : h('button', { onclick: () => { this.editingSlice = { name: newId('Slice ', slices.map((s) => s.name)) }; this.renderPanel(); } }, '+ New slice'),
+        : h('button', { onclick: () => { this.editingSlice = { name: newId('Slice ', slices.map((s) => s.name)) }; this.renderSettings(); } }, '+ New slice'),
     );
   }
 
@@ -1102,7 +1402,7 @@ class App {
           h('input', { value: (s.roots ?? []).join(', '), onchange: (e: Event) => (s.roots = splitList((e.target as HTMLInputElement).value)) }),
           h('button', { title: 'Use selected nodes', onclick: () => {
             s.roots = this.selection.filter((id) => this.node(id));
-            this.renderPanel();
+            this.renderSettings();
           } }, 'use selection'),
         )),
       field('Follow edges', select(
@@ -1113,7 +1413,7 @@ class App {
       h('p', { class: 'muted small' }, 'Filters combine: node types AND tags, edges by dependency type. With start nodes, only nodes reachable over the allowed edges are shown.'),
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
-        h('button', { onclick: () => { this.editingSlice = undefined; this.renderPanel(); } }, 'Cancel'),
+        h('button', { onclick: () => { this.editingSlice = undefined; this.renderSettings(); } }, 'Cancel'),
       ),
     );
   }

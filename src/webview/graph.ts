@@ -31,6 +31,8 @@ export interface GraphCallbacks {
   onDropConnect(source: string, target: string): void;
   /** Double click on a node. */
   onNodeDoubleClick(id: string): void;
+  /** The mouse rests on a node (`undefined` when it leaves). */
+  onHover(id: string | undefined): void;
 }
 
 const cssVar = (name: string, fallback: string) =>
@@ -88,8 +90,15 @@ export class GraphView {
       else if (e.target.isNode()) this.cb.onNodeDoubleClick(e.target.id());
     });
 
-    this.cy.on('mouseover', 'node', (e) => e.target.addClass('hover'));
-    this.cy.on('mouseout', 'node', (e) => e.target.removeClass('hover'));
+    this.cy.on('mouseover', 'node', (e) => {
+      e.target.addClass('hover');
+      this.cb.onHover(e.target.id());
+    });
+    this.cy.on('mouseout', 'node', (e) => {
+      e.target.removeClass('hover');
+      this.cb.onHover(undefined);
+    });
+    this.cy.on('grab cxttap', () => this.cb.onHover(undefined));
 
     // Drag a node onto another one to connect them; the dragged node then springs back.
     this.cy.on('grab', 'node', (e) => {

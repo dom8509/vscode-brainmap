@@ -18,22 +18,33 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   `Tab` makes a child, `Enter` a sibling. `F2` or double-click renames.
 - **Drag to connect** – drag a node onto another one and let go. Number keys pick the
   connection type while you drag. The dragged node springs back.
-- **Connect with node…** – right-click a node, the *Connect…* button or `C`: type part of
-  another node's name, pick it (↑/↓, Enter) and the direction (→ to it, ← from it, ↔ both).
-- **Two selected nodes** (Ctrl/Shift+click) – connect them from the edit window or right-click.
-- **Edit window** – floats next to the selection: name, type pills, tags, connections, actions.
-  For a connection: direction (one-way / two-way / reverse), type, tags and label.
-  Drag it by its header to park it; ⌖ attaches it again.
-- **Delete** – right-click → Delete, or `Backspace`/`Del`. You are always asked first.
+- **Hover = read** – rest the mouse on a node for half a second: a card shows its description,
+  all tags and how it is connected (`2 in · 3 out`, `depends-on ×3`). No buttons.
+- **Select = act** – a small bar above the selection: type ▾, `#` tag (field with suggestions),
+  color, `+` child, connect, delete, `⋯` details. Each button has a tooltip with its shortcut.
+  A selected connection gets type, tag, one-way/two-way, reverse, delete; two nodes get
+  "A → B" and "↔"; more nodes get "type for all", "tag to all" and "save as slice".
+- **Right-click = everything** – every action, with words and shortcuts: add child/sibling,
+  connect with…, rename, type ▸, color ▸, tags ▸, focus on this, select neighbours,
+  slice from here, duplicate, copy id, open details, delete. With two nodes selected the menu
+  starts with A → B, B → A and A ↔ B.
+- **Connect with…** (`C`) – type part of another node's name, pick it (↑/↓, Enter) and the
+  direction (→ to it, ← from it, ↔ both).
+- **Details sidebar** (`D`, `⋯` or the *Details* button) – everything about the selection:
+  name, type, tags, description, color, id and all connections; for a connection its
+  direction, type, tags and label.
+- **Toolbar menus** – *Layout ▾* (spacing, edge length, direction, hierarchy types, run/fit),
+  *Style ▾* (colors per type, tag and connection type) and *Slices ▾* (saved views).
+- **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
 - **View follows the selection** (⚙ → Layout → "Center view on the selected node").
 - **Layouts** – *Physics* (cytoscape-cola, neighbours follow while you drag) and *Hierarchy*
   (dagre, rounded right-angle connections) in the toolbar; more under *More…*.
   Positions are not saved: the layout arranges the graph each time the file opens.
 - **Hierarchy by dependency type** – pick which connection types build the hierarchy.
-- **Proximity, styling and slices** – in ⚙ settings: spacing, edge length per connection type,
+- **Proximity, styling and slices** – spacing, edge length per connection type,
   colors by type or tag, and saved slices (filter by type, tag, connection type, neighbourhood).
-- **Keys** – `Tab` child · `Enter` sibling · `C` connect · `F` focus · `G` groups ·
+- **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
   `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.
