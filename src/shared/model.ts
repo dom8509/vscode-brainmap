@@ -141,16 +141,16 @@ export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
 };
 
 export const PALETTE = [
-  '#4e79a7',
-  '#f28e2b',
-  '#e15759',
-  '#76b7b2',
-  '#59a14f',
-  '#edc948',
-  '#b07aa1',
-  '#ff9da7',
-  '#9c755f',
-  '#bab0ac',
+  '#5B9BFF',
+  '#3DD68C',
+  '#FF9F43',
+  '#B98CFF',
+  '#F2B84B',
+  '#FF6B8B',
+  '#4FD1C5',
+  '#E879F9',
+  '#A3E635',
+  '#94A3B8',
 ];
 
 export function emptyMap(): BrainMap {

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { detectFormat, parse, serialize } from './shared/format';
 import { FileFormat, emptyMap } from './shared/model';
@@ -70,7 +71,7 @@ class BrainMapEditorProvider implements vscode.CustomTextEditorProvider {
     const sendDocument = () => {
       const text = document.getText();
       try {
-        post({ type: 'load', map: parse(text), format: detectFormat(text, defaultFormat) });
+        post({ type: 'load', map: parse(text), format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path) });
       } catch (err) {
         post({ type: 'error', message: `Could not parse ${document.fileName}: ${(err as Error).message}` });
       }

@@ -2,7 +2,7 @@ import { BrainMap, FileFormat } from './model';
 
 /** Messages sent from the extension host to the webview. */
 export type HostMessage =
-  | { type: 'load'; map: BrainMap; format: FileFormat }
+  | { type: 'load'; map: BrainMap; format: FileFormat; fileName: string }
   | { type: 'error'; message: string };
 
 /** Messages sent from the webview to the extension host. */

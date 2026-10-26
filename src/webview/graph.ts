@@ -8,9 +8,11 @@ import {
   LayoutSettings,
   Position,
   computeSlice,
+  autoColor,
   resolveEdgeStyle,
   resolveNodeStyle,
 } from '../shared/model';
+import { CARD_HEIGHT } from './cards';
 
 cytoscape.use(cola);
 cytoscape.use(fcose);
@@ -23,6 +25,12 @@ export interface GraphCallbacks {
   onContextMenu(target: { kind: 'node' | 'edge' | 'background'; id?: string }, client: Position, pos: Position): void;
   /** Pan, zoom or node movement changed where things are on screen. */
   onViewport(): void;
+  /** A dragged node hovers over another node (or left it: `target` undefined). */
+  onDropHover(source: string, target: string | undefined): void;
+  /** A dragged node was released on another node. */
+  onDropConnect(source: string, target: string): void;
+  /** Double click on a node. */
+  onNodeDoubleClick(id: string): void;
 }
 
 const cssVar = (name: string, fallback: string) =>
@@ -36,6 +44,11 @@ export class GraphView {
   private selTimer?: number;
   /** Center the view on the selection (layout setting `followSelection`). */
   follow = true;
+  /** Dim everything that is not next to the selection. */
+  focus = true;
+  private dashOffset = 0;
+  private dashFrame = 0;
+  private drag?: { id: string; start: Position; target?: string; held?: string };
 
   constructor(container: HTMLElement, private readonly cb: GraphCallbacks) {
     this.cy = cytoscape({
@@ -53,6 +66,7 @@ export class GraphView {
       this.selTimer = window.setTimeout(() => {
         const ids = this.cy.$(':selected').map((e) => e.id());
         if (this.follow && ids.length) this.centerOn(ids);
+        this.applyFocus();
         this.cb.onSelect(ids);
       }, 10);
     });
@@ -71,47 +85,106 @@ export class GraphView {
 
     this.cy.on('dbltap', (e) => {
       if (e.target === this.cy) this.cb.onBackgroundDoubleClick(e.position);
+      else if (e.target.isNode()) this.cb.onNodeDoubleClick(e.target.id());
     });
 
-    // Highlight the neighbourhood of the hovered node.
-    this.cy.on('mouseover', 'node', (e) => {
-      const hood = e.target.closedNeighborhood();
-      this.cy.elements().not(hood).addClass('faded');
-      hood.addClass('hover');
+    this.cy.on('mouseover', 'node', (e) => e.target.addClass('hover'));
+    this.cy.on('mouseout', 'node', (e) => e.target.removeClass('hover'));
+
+    // Drag a node onto another one to connect them; the dragged node then springs back.
+    this.cy.on('grab', 'node', (e) => {
+      this.drag = { id: e.target.id(), start: { ...e.target.position() } };
     });
-    this.cy.on('mouseout', 'node', () => this.cy.elements().removeClass('faded hover'));
+    this.cy.on('drag', 'node', (e) => {
+      const drag = this.drag;
+      if (!drag || drag.id !== e.target.id()) return;
+      const p = e.target.position();
+      // Pads are half the dragged card plus a margin, i.e. "the cards are about to touch".
+      const inside = (n: any, near: boolean) => {
+        const b = n.boundingBox({});
+        const px = near ? e.target.width() / 2 + 40 : 0;
+        const py = near ? CARD_HEIGHT / 2 + 40 : 0;
+        return p.x > b.x1 - px && p.x < b.x2 + px && p.y > b.y1 - py && p.y < b.y2 + py;
+      };
+      const others = this.cy.nodes().not('.hidden').filter((n) => !n.same(e.target));
+      // Live physics pushes nodes apart, so hold the node we approach still until we leave it.
+      const near = others.filter((n) => inside(n, true));
+      const nearId = near.nonempty() ? near[0].id() : undefined;
+      if (nearId !== drag.held) {
+        if (drag.held) this.cy.getElementById(drag.held).unlock();
+        drag.held = nearId && !near[0].locked() ? nearId : undefined;
+        if (drag.held) near[0].lock();
+      }
+      const over = near.filter((n) => inside(n, false));
+      const target = over.nonempty() ? over[0].id() : undefined;
+      if (target === drag.target) return;
+      if (drag.target) this.cy.getElementById(drag.target).removeClass('drop-target');
+      if (target) this.cy.getElementById(target).addClass('drop-target');
+      drag.target = target;
+      this.cb.onDropHover(drag.id, target);
+    });
+    this.cy.on('free', 'node', (e) => {
+      const drag = this.drag;
+      this.drag = undefined;
+      if (drag?.held) this.cy.getElementById(drag.held).unlock();
+      if (!drag?.target || drag.id !== e.target.id()) return;
+      this.cy.getElementById(drag.target).removeClass('drop-target');
+      e.target.animate({ position: drag.start } as any, { duration: 300, easing: 'ease-out-cubic' } as any);
+      this.cb.onDropConnect(drag.id, drag.target);
+      this.cb.onDropHover(drag.id, undefined);
+    });
+  }
+
+  /** Focus mode: dim what is not next to the selection and let its connections flow. */
+  applyFocus() {
+    const cy = this.cy;
+    cy.batch(() => {
+      cy.elements().removeClass('fdim on off');
+      const sel = cy.$(':selected');
+      if (!this.focus || sel.empty()) return;
+      const nodes = sel.nodes().union(sel.edges().connectedNodes());
+      const hood = nodes.closedNeighborhood().nodes().union(nodes);
+      const active = sel.nodes().connectedEdges().union(sel.edges());
+      cy.nodes().not(hood).addClass('fdim');
+      active.addClass('on');
+      cy.edges().not(active).addClass('off');
+    });
+    this.animateDashes();
+  }
+
+  /** Moves the dash pattern of active connections so they look like they flow. */
+  private animateDashes() {
+    cancelAnimationFrame(this.dashFrame);
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const step = () => {
+      const on = this.cy.edges('.on');
+      if (on.empty() || reduced) return;
+      this.dashOffset = (this.dashOffset - 0.6) % 1000;
+      on.style('line-dash-offset', this.dashOffset);
+      this.dashFrame = requestAnimationFrame(step);
+    };
+    this.dashFrame = requestAnimationFrame(step);
   }
 
   private stylesheet(): any[] {
     const fg = cssVar('--vscode-editor-foreground', '#cccccc');
-    const bg = cssVar('--vscode-editor-background', '#1e1e1e');
-    const focus = cssVar('--vscode-focusBorder', '#007fd4');
+    const card = cssVar('--vscode-editorWidget-background', '#20232A');
+    const border = cssVar('--vscode-widget-border', '#343944');
+    const accent = cssVar('--vscode-focusBorder', '#5B9BFF');
     const font = cssVar('--vscode-font-family', 'sans-serif');
     return [
       {
+        // The node is an invisible hit box; the HTML card on top draws it.
         selector: 'node',
         style: {
-          label: 'data(label)',
-          'background-color': 'data(color)',
-          shape: 'data(shape)',
+          shape: 'round-rectangle',
           width: 'data(width)',
-          height: 'data(size)',
-          color: 'data(textColor)',
-          'font-family': font,
-          'font-size': 12,
-          'text-valign': 'center',
-          'text-halign': 'center',
-          'text-wrap': 'wrap',
-          'text-max-width': '160px',
-          'border-width': 1,
-          'border-color': bg,
-          'transition-property': 'opacity, background-color, border-width',
-          'transition-duration': 200,
+          height: CARD_HEIGHT,
+          'background-opacity': 0,
+          'border-width': 0,
+          label: '',
+          'overlay-opacity': 0,
         } as any,
-      },
-      {
-        selector: 'node:selected',
-        style: { 'border-width': 3, 'border-color': focus, 'overlay-opacity': 0 } as any,
       },
       {
         selector: 'edge',
@@ -123,28 +196,37 @@ export class GraphView {
           'target-arrow-shape': 'triangle',
           'source-arrow-color': 'data(color)',
           'source-arrow-shape': 'data(sourceArrow)',
-          'arrow-scale': 1.1,
+          'arrow-scale': 0.85,
           'curve-style': 'bezier',
+          'line-cap': 'round',
           label: 'data(label)',
-          'font-size': 10,
+          'font-size': 11,
           'font-family': font,
           color: fg,
-          'text-rotation': 'autorotate',
-          'text-background-color': bg,
-          'text-background-opacity': 0.85,
-          'text-background-padding': '2px',
-          'transition-property': 'opacity, line-color',
-          'transition-duration': 200,
+          'text-background-color': card,
+          'text-background-opacity': 1,
+          'text-background-shape': 'round-rectangle',
+          'text-background-padding': '3px',
+          'text-border-width': 1,
+          'text-border-color': border,
+          'text-border-opacity': 1,
+          'overlay-opacity': 0,
+          'transition-property': 'opacity, width',
+          'transition-duration': 250,
         } as any,
       },
+      { selector: 'edge.taxi-down', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'downward', 'taxi-radius': 18 } as any },
+      { selector: 'edge.taxi-up', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'upward', 'taxi-radius': 18 } as any },
+      { selector: 'edge.taxi-right', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'rightward', 'taxi-radius': 18 } as any },
+      { selector: 'edge.taxi-left', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'leftward', 'taxi-radius': 18 } as any },
+      { selector: 'edge.on', style: { width: 2.6, 'line-style': 'dashed', 'line-dash-pattern': [8, 6] } as any },
+      { selector: 'edge.off', style: { opacity: 0.12 } },
       {
         selector: 'edge:selected',
-        style: { width: 4, 'line-color': focus, 'target-arrow-color': focus, 'source-arrow-color': focus, 'overlay-opacity': 0 } as any,
+        style: { width: 3, 'line-color': accent, 'target-arrow-color': accent, 'source-arrow-color': accent } as any,
       },
-      { selector: '.faded', style: { opacity: 0.25 } },
       { selector: '.dimmed', style: { opacity: 0.1, events: 'no' } as any },
       { selector: '.hidden', style: { display: 'none' } },
-      { selector: '.search-hit', style: { 'border-width': 4, 'border-color': '#ffd700' } as any },
     ];
   }
 
@@ -163,16 +245,17 @@ export class GraphView {
       for (const n of map.nodes) {
         const st = resolveNodeStyle(map, n);
         const label = n.label || n.id;
-        const longest = Math.max(...label.split('\n').map((l) => l.length));
+        const typeColor = (n.type && map.settings.style?.nodeTypes?.[n.type]?.color) || (n.type ? autoColor(n.type) : st.color);
         const data = {
           id: n.id,
           label,
           color: st.color,
-          textColor: readableText(st.color),
-          shape: st.shape,
-          size: st.size,
-          width: Math.max(st.size, Math.min(longest, 24) * 7 + 24),
+          typeColor,
           type: n.type ?? '',
+          typeName: n.type ? n.type.charAt(0).toUpperCase() + n.type.slice(1) : '',
+          tags: n.tags ?? [],
+          // Wide enough for the name, within limits so the graph stays tidy.
+          width: Math.round(Math.max(170, Math.min(260, label.length * 7.4 + 96))),
         };
         const existing = cy.getElementById(n.id);
         if (existing.nonempty()) existing.data(data);
@@ -199,7 +282,7 @@ export class GraphView {
           type: e.type ?? '',
           color: st.color,
           lineStyle: st.lineStyle,
-          width: st.width,
+          width: Math.min(st.width ?? 2, 2),
         };
         const existing = cy.getElementById(e.id);
         if (existing.nonempty() && existing.data('source') === e.source && existing.data('target') === e.target)
@@ -213,7 +296,9 @@ export class GraphView {
       this.pending.clear();
       this.applySlice(map);
       this.applyHierarchyEdgeVisibility(map);
+      this.applyEdgeRouting(map);
     });
+    this.applyFocus();
     return { added };
   }
 
@@ -235,6 +320,14 @@ export class GraphView {
     cy.edges().forEach((e) => {
       if (!res.edges.has(e.id())) e.addClass(cls);
     });
+  }
+
+  /** Hierarchies get rounded right-angle connections in the flow direction. */
+  private applyEdgeRouting(map: BrainMap) {
+    const l = { ...DEFAULT_LAYOUT, ...map.settings.layout };
+    const cls = { TB: 'taxi-down', BT: 'taxi-up', LR: 'taxi-right', RL: 'taxi-left' }[l.direction];
+    this.cy.edges().removeClass('taxi-down taxi-up taxi-right taxi-left');
+    if (l.name === 'hierarchy') this.cy.edges().addClass(cls);
   }
 
   /** In hierarchy mode edges outside the hierarchy can be hidden. */
@@ -309,7 +402,7 @@ export class GraphView {
           ...anim,
           rankDir: l.direction,
           nodeSep: l.nodeSpacing,
-          rankSep: l.edgeLength,
+          rankSep: Math.max(l.edgeLength, 60),
           edgeSep: 10,
         };
         break;
@@ -346,7 +439,7 @@ export class GraphView {
     const settle = () => {
       const selected = this.follow ? this.cy.$(':selected').map((e) => e.id()) : [];
       if (selected.length) this.centerOn(selected);
-      else if (fit && l.name === 'force' && l.live) this.fit();
+      else if ((fit && l.name === 'force' && l.live) || !this.allInView()) this.fit();
     };
     if (l.name === 'force' && l.live) window.setTimeout(() => this.layout === layout && settle(), 1200);
     else layout.one('layoutstop', settle);
@@ -399,16 +492,14 @@ export class GraphView {
     return hits.map((n) => n.id());
   }
 
+  /** True when every visible node is inside the viewport. */
+  private allInView(): boolean {
+    const bb = this.cy.nodes().not('.hidden').boundingBox({});
+    const ext = this.cy.extent();
+    return bb.w === 0 || (bb.x1 >= ext.x1 && bb.x2 <= ext.x2 && bb.y1 >= ext.y1 && bb.y2 <= ext.y2);
+  }
+
   fit() {
     this.cy.animate({ fit: { eles: this.cy.elements().not('.hidden'), padding: 40 } } as any, { duration: 400 });
   }
-}
-
-/** Black or white, whichever reads better on the given background. */
-function readableText(color: string): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
-  if (!m) return '#ffffff';
-  const n = parseInt(m[1], 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#1e1e1e' : '#ffffff';
 }

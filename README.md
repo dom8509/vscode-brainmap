@@ -8,35 +8,33 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 
 ## Features
 
-- **Start** – an empty graph shows one big **+** in the middle. Click it to create the first node.
-- **Right-click a node** – add a connected node, slice from here, delete.
-- **Connect with node…** (right-click a node, the *Connect…* button or `C`) – type part of
-  another node's name, pick it from the suggestions (↑/↓, Enter) and choose the direction
-  (→ to it, ← from it, ↔ both).
-- **Select two nodes** (Ctrl/Shift+click) and right-click one of them – connect them
-  (A → B, B → A or A ↔ B).
-- **Right-click a connection** – make it one-way / two-way, reverse it, delete it.
-- **Floating edit window** – selecting a node shows its name, type and tags (all editable;
-  "More" has id, color and description). Selecting a connection shows its type, tags,
-  direction and label. Drag the window by its header to park it; ⌖ attaches it to the selection again.
+- **Cards** – every node is a card with an icon (picked from its type name), its type and tags.
+- **Groups** – soft colored areas around nodes of the same type (`G` or the *Groups* button).
+- **Focus** – select a node: everything else fades and its connections flow (`F` or *Focus*).
+- **Zoom out** – cards turn into colored blocks and groups show big names. A minimap sits in the corner.
+- **Start** – an empty graph shows a big **+** (or press `Enter`) and three starter templates.
+- **Type on the canvas** – new nodes open with their name ready to type.
+  `#tag` adds a tag, `:type` sets the type, e.g. `Shipping #core :service`.
+  `Tab` makes a child, `Enter` a sibling. `F2` or double-click renames.
+- **Drag to connect** – drag a node onto another one and let go. Number keys pick the
+  connection type while you drag. The dragged node springs back.
+- **Connect with node…** – right-click a node, the *Connect…* button or `C`: type part of
+  another node's name, pick it (↑/↓, Enter) and the direction (→ to it, ← from it, ↔ both).
+- **Two selected nodes** (Ctrl/Shift+click) – connect them from the edit window or right-click.
+- **Edit window** – floats next to the selection: name, type pills, tags, connections, actions.
+  For a connection: direction (one-way / two-way / reverse), type, tags and label.
+  Drag it by its header to park it; ⌖ attaches it again.
 - **Delete** – right-click → Delete, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
-- **View follows the selection** – the selected node moves to the middle of the view
-  (switch off in ⚙ Settings → Layout → "Center view on the selected node").
-- **Layouts** – force with live physics (cytoscape-cola), fCoSE, hierarchy (dagre), tree,
-  concentric, circle, grid. Positions are not saved: the layout arranges the graph each time
-  the file opens. With live physics the neighbours follow while you drag a node.
-- **Hierarchy by dependency type** – pick which connection types (e.g. `depends-on`, `part-of`)
-  build the hierarchy. Others are still drawn, or can be hidden.
-- **Proximity** – node spacing, edge length and a preferred length per connection type
-  (smaller = connected nodes stay closer).
-- **Styling** – color nodes by type or by tag; per type: color, shape, size; per tag: color;
-  per connection type: color, line style. A node's own `color` always wins.
-- **Slices** – saved views of a part of the graph: filter by node type, tag, connection type and/or
-  the neighbourhood of start nodes (downstream / upstream / both, max depth). Two-way connections
-  are followed in both directions. Nodes outside a slice are hidden or dimmed.
-- **Keys** – `N` new connected node · `C` connect with node · `Backspace` delete · `F` fit · `L` re-run layout ·
-  `Esc` deselect · `Ctrl+Z` undo.
+- **View follows the selection** (⚙ → Layout → "Center view on the selected node").
+- **Layouts** – *Physics* (cytoscape-cola, neighbours follow while you drag) and *Hierarchy*
+  (dagre, rounded right-angle connections) in the toolbar; more under *More…*.
+  Positions are not saved: the layout arranges the graph each time the file opens.
+- **Hierarchy by dependency type** – pick which connection types build the hierarchy.
+- **Proximity, styling and slices** – in ⚙ settings: spacing, edge length per connection type,
+  colors by type or tag, and saved slices (filter by type, tag, connection type, neighbourhood).
+- **Keys** – `Tab` child · `Enter` sibling · `C` connect · `F` focus · `G` groups ·
+  `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.
 

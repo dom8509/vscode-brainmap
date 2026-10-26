@@ -57,7 +57,7 @@ export class ContextMenu {
 }
 
 /** Modal yes/no dialog. Enter confirms, Esc cancels. */
-export function confirmDialog(parent: HTMLElement, message: string, okLabel = 'Delete'): Promise<boolean> {
+export function confirmDialog(parent: HTMLElement, message: string, okLabel = 'Delete', detail?: string): Promise<boolean> {
   return new Promise((resolve) => {
     const done = (ok: boolean) => {
       overlay.remove();
@@ -78,7 +78,8 @@ export function confirmDialog(parent: HTMLElement, message: string, okLabel = 'D
       h(
         'div',
         { class: 'modal', role: 'dialog' },
-        h('p', {}, message),
+        h('div', { class: 'modal-title' }, message),
+        detail && h('p', {}, detail),
         h('div', { class: 'row end' }, h('button', { onclick: () => done(false) }, 'Cancel'), ok),
       ),
     );
@@ -97,6 +98,7 @@ export class FloatingWindow {
   private header = h('div', { class: 'floating-header' });
   readonly body = h('div', { class: 'floating-body' });
   private titleEl = h('span', { class: 'title' });
+  private dot = h('span', { class: 'title-dot' });
 
   constructor(
     private readonly parent: HTMLElement,
@@ -106,6 +108,7 @@ export class FloatingWindow {
     onClose: () => void,
   ) {
     this.header.append(
+      this.dot,
       this.titleEl,
       h('button', { class: 'icon', title: 'Attach to selection', onclick: () => this.setDetached(undefined) }, '⌖'),
       h('button', { class: 'icon', title: 'Close (Esc)', onclick: onClose }, '✕'),
@@ -120,9 +123,17 @@ export class FloatingWindow {
     return !this.el.classList.contains('hidden');
   }
 
-  show(title: string, content: HTMLElement[]) {
+  show(title: string, content: (HTMLElement | false)[], color?: string) {
     this.titleEl.textContent = title;
-    this.body.replaceChildren(...content);
+    this.dot.style.display = color ? '' : 'none';
+    if (color) this.dot.style.background = color;
+    this.body.replaceChildren(...content.filter((c): c is HTMLElement => !!c));
+    if (this.el.classList.contains('hidden')) {
+      // Replay the entry animation each time the window appears.
+      this.el.classList.remove('rise');
+      void this.el.offsetWidth;
+      this.el.classList.add('rise');
+    }
     this.el.classList.remove('hidden');
   }
 
