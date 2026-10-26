@@ -1,5 +1,7 @@
 // Data model of a .brainmap file. Shared by the extension host and the webview.
 
+import { FilterNode, FilterValues, makeGroup, matches, prune, readFilter } from './filter';
+
 export interface Position {
   x: number;
   y: number;
@@ -93,11 +95,15 @@ export type SliceDirection = 'downstream' | 'upstream' | 'both';
 
 export interface Slice {
   name: string;
-  /** Keep only nodes of these types (empty = all). */
+  /** Which nodes the slice keeps (none = all). */
+  nodeFilter?: FilterNode;
+  /** Which edges the slice keeps and follows from the start nodes (none = all). */
+  edgeFilter?: FilterNode;
+  /** @deprecated Read from older files and turned into nodeFilter. */
   nodeTypes?: string[];
-  /** Keep only nodes having at least one of these tags (empty = all). */
+  /** @deprecated Read from older files and turned into nodeFilter. */
   tags?: string[];
-  /** Keep only edges of these types (empty = all). */
+  /** @deprecated Read from older files and turned into edgeFilter. */
   edgeTypes?: string[];
   /** Start nodes for a neighbourhood slice. */
   roots?: string[];
@@ -201,11 +207,29 @@ export function normalize(raw: unknown): BrainMap {
       ...settings,
       layout,
       style: { colorBy: 'type', ...(settings.style ?? {}) },
-      slices: Array.isArray(settings.slices) ? settings.slices.filter((s) => s && s.name) : [],
+      slices: Array.isArray(settings.slices) ? settings.slices.filter((s) => s && s.name).map(readSlice) : [],
     },
     nodes,
     edges,
   };
+}
+
+/** Reads a slice; the type, tag and edge type lists of older files become filters. */
+function readSlice(raw: Slice): Slice {
+  const { nodeTypes, tags, edgeTypes, nodeFilter, edgeFilter, ...rest } = raw;
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+  const anyOf = (property: string, op: 'is' | 'has', values: string[]) =>
+    values.length === 1 ? { property, op, value: values[0] } : makeGroup('or', values.map((value) => ({ property, op, value })));
+  const nodeParts: FilterNode[] = [];
+  if (list(nodeTypes).length) nodeParts.push(anyOf('type', 'is', list(nodeTypes)));
+  if (list(tags).length) nodeParts.push(anyOf('tags', 'has', list(tags)));
+  const oldEdges = list(edgeTypes).length ? anyOf('type', 'is', list(edgeTypes)) : undefined;
+  const slice: Slice = { ...rest, name: String(raw.name) };
+  const nf = readFilter(nodeFilter) ?? (nodeParts.length ? makeGroup('and', nodeParts) : undefined);
+  const ef = readFilter(edgeFilter) ?? (oldEdges ? makeGroup('and', [oldEdges]) : undefined);
+  if (nf) slice.nodeFilter = nf;
+  if (ef) slice.edgeFilter = ef;
+  return slice;
 }
 
 export function uniqueTypes(map: BrainMap) {
@@ -269,16 +293,61 @@ export interface SliceResult {
   edges: Set<string>;
 }
 
-/** Computes which nodes and edges belong to a slice. */
-export function computeSlice(map: BrainMap, slice: Slice): SliceResult {
-  const nodeTypes = slice.nodeTypes?.length ? new Set(slice.nodeTypes) : undefined;
-  const tags = slice.tags?.length ? new Set(slice.tags) : undefined;
-  const edgeTypes = slice.edgeTypes?.length ? new Set(slice.edgeTypes) : undefined;
+/** What a node offers to a filter. Connections are counted in the whole graph; a two-way edge counts as in and out. */
+export function nodeValues(map: BrainMap): (n: BrainNode) => FilterValues {
+  const ins = new Map<string, number>();
+  const outs = new Map<string, number>();
+  const all = new Map<string, number>();
+  const inc = (m: Map<string, number>, id: string) => m.set(id, (m.get(id) ?? 0) + 1);
+  for (const e of map.edges) {
+    const both = e.directed === false;
+    inc(outs, e.source);
+    inc(ins, e.target);
+    if (both) {
+      inc(ins, e.source);
+      inc(outs, e.target);
+    }
+    inc(all, e.source);
+    if (e.target !== e.source) inc(all, e.target);
+  }
+  return (n) => ({
+    name: n.label || n.id,
+    id: n.id,
+    type: n.type,
+    tags: n.tags ?? [],
+    description: n.description,
+    in: ins.get(n.id) ?? 0,
+    out: outs.get(n.id) ?? 0,
+    degree: all.get(n.id) ?? 0,
+  });
+}
 
-  const nodeOk = (n: BrainNode) =>
-    (!nodeTypes || (n.type !== undefined && nodeTypes.has(n.type))) &&
-    (!tags || (n.tags ?? []).some((t) => tags.has(t)));
-  const edgeOk = (e: BrainEdge) => !edgeTypes || (e.type !== undefined && edgeTypes.has(e.type));
+export function edgeValues(e: BrainEdge): FilterValues {
+  return {
+    type: e.type,
+    tags: e.tags ?? [],
+    label: e.label,
+    direction: e.directed === false ? 'two-way' : 'one-way',
+  };
+}
+
+/** Drops empty filter groups before a slice is saved. */
+export function tidySlice(slice: Slice): Slice {
+  const { nodeFilter, edgeFilter, ...rest } = slice;
+  const out: Slice = { ...rest };
+  const nf = prune(nodeFilter);
+  const ef = prune(edgeFilter);
+  if (nf) out.nodeFilter = nf;
+  if (ef) out.edgeFilter = ef;
+  return out;
+}
+
+/** Computes which nodes and edges belong to a slice. */
+export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
+  const slice = readSlice(raw);
+  const values = nodeValues(map);
+  const nodeOk = (n: BrainNode) => matches(slice.nodeFilter, values(n));
+  const edgeOk = (e: BrainEdge) => matches(slice.edgeFilter, edgeValues(e));
 
   let nodes = new Set(map.nodes.filter(nodeOk).map((n) => n.id));
   let candidateEdges = map.edges.filter((e) => edgeOk(e));

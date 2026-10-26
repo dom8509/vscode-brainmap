@@ -12,9 +12,13 @@ import {
   emptyMap,
   newId,
   resolveEdgeStyle,
+  computeSlice,
   resolveNodeStyle,
+  tidySlice,
   uniqueTypes,
 } from '../shared/model';
+import { describeFilter } from '../shared/filter';
+import { filterEditor } from './filterEditor';
 import { HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
@@ -439,6 +443,13 @@ class App {
     node.id = id;
     this.commit();
     this.graph.select([id]);
+  }
+
+  /** ` · 12/40`: how many nodes the active slice shows. */
+  private sliceCount(): string {
+    const slice = this.map.settings.slices?.find((s) => s.name === this.map.settings.activeSlice);
+    if (!slice) return '';
+    return ` · ${computeSlice(this.map, slice).nodes.size}/${this.map.nodes.length}`;
   }
 
   private showSlice(name: string | undefined) {
@@ -1232,7 +1243,7 @@ class App {
       h('div', { class: 'group' },
         menuBtn('layout', 'Layout'),
         menuBtn('style', 'Style'),
-        menuBtn('slices', slice ? `Slice: ${slice}` : 'Slices'),
+        menuBtn('slices', slice ? `Slice: ${slice}${this.sliceCount()}` : 'Slices'),
       ),
       h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
       h('div', { class: 'group' },
@@ -1382,7 +1393,8 @@ class App {
     const types = uniqueTypes(this.map);
     const save = () => {
       const slices = (this.map.settings.slices ??= []);
-      const { __orig, ...slice } = s;
+      const { __orig, ...rest } = s;
+      const slice = tidySlice(rest);
       if (!slice.name.trim()) return;
       const idx = slices.findIndex((x) => x.name === (__orig ?? slice.name));
       if (idx >= 0) slices[idx] = slice;
@@ -1391,15 +1403,28 @@ class App {
       this.editingSlice = undefined;
       this.showSlice(slice.name);
     };
+    const names = this.map.nodes.map((n) => nameOf(n));
+    const nodeSuggestions = (p: string) =>
+      p === 'type' ? types.nodeTypes : p === 'tags' ? types.tags : p === 'name' ? names : p === 'id' ? this.map.nodes.map((n) => n.id) : [];
+    const edgeSuggestions = (p: string) =>
+      p === 'type' ? types.edgeTypes : p === 'tags' ? types.tags : p === 'label' ? [...new Set(this.map.edges.map((e) => e.label ?? '').filter(Boolean))] : [];
+    const count = h('p', { class: 'muted small filter-count' });
+    const updateCount = () => {
+      const res = computeSlice(this.map, s);
+      count.textContent = `Matches ${res.nodes.size} of ${this.map.nodes.length} nodes · ${res.edges.size} of ${this.map.edges.length} connections`;
+    };
+    updateCount();
     return h('div', { class: 'slice-editor' },
       h('h4', {}, s.__orig ? `Edit slice` : 'New slice'),
       field('Name', h('input', { value: s.name, oninput: (e: Event) => (s.name = (e.target as HTMLInputElement).value) })),
-      field('Node types', checklist(types.nodeTypes, s.nodeTypes, (v) => (s.nodeTypes = v))),
-      field('Tags (any of)', checklist(types.tags, s.tags, (v) => (s.tags = v))),
-      field('Dependency types', checklist(types.edgeTypes, s.edgeTypes, (v) => (s.edgeTypes = v))),
+      h('h4', {}, 'Nodes'),
+      filterEditor('node', s.nodeFilter, nodeSuggestions, (f) => { s.nodeFilter = f; updateCount(); }),
+      h('h4', {}, 'Connections'),
+      filterEditor('edge', s.edgeFilter, edgeSuggestions, (f) => { s.edgeFilter = f; updateCount(); }),
+      h('h4', {}, 'Neighbourhood'),
       field('Start nodes (ids, comma separated)',
         h('div', { class: 'row' },
-          h('input', { value: (s.roots ?? []).join(', '), onchange: (e: Event) => (s.roots = splitList((e.target as HTMLInputElement).value)) }),
+          h('input', { value: (s.roots ?? []).join(', '), onchange: (e: Event) => { s.roots = splitList((e.target as HTMLInputElement).value); updateCount(); } }),
           h('button', { title: 'Use selected nodes', onclick: () => {
             s.roots = this.selection.filter((id) => this.node(id));
             this.renderSettings();
@@ -1407,10 +1432,11 @@ class App {
         )),
       field('Follow edges', select(
         [{ value: 'downstream', label: 'Downstream (outgoing)' }, { value: 'upstream', label: 'Upstream (incoming)' }, { value: 'both', label: 'Both directions' }],
-        s.direction ?? 'downstream', (v) => (s.direction = v as any))),
+        s.direction ?? 'downstream', (v) => { s.direction = v as any; updateCount(); })),
       field('Max depth (empty = unlimited)', h('input', { type: 'number', min: 0, value: s.depth ?? '',
-        onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); } })),
-      h('p', { class: 'muted small' }, 'Filters combine: node types AND tags, edges by dependency type. With start nodes, only nodes reachable over the allowed edges are shown.'),
+        onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); updateCount(); } })),
+      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown.'),
+      count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
         h('button', { onclick: () => { this.editingSlice = undefined; this.renderSettings(); } }, 'Cancel'),
@@ -1421,9 +1447,10 @@ class App {
 
 function describeSlice(s: Slice): string {
   const parts: string[] = [];
-  if (s.nodeTypes?.length) parts.push(`types: ${s.nodeTypes.join(', ')}`);
-  if (s.tags?.length) parts.push(`tags: ${s.tags.join(', ')}`);
-  if (s.edgeTypes?.length) parts.push(`edges: ${s.edgeTypes.join(', ')}`);
+  const nodes = describeFilter(s.nodeFilter, 'node');
+  const edges = describeFilter(s.edgeFilter, 'edge');
+  if (nodes) parts.push(nodes);
+  if (edges) parts.push(`connections: ${edges}`);
   if (s.roots?.length) parts.push(`from ${s.roots.join(', ')} ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
   return parts.join(' · ') || 'everything';
 }

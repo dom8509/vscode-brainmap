@@ -1127,6 +1127,72 @@ button:disabled {
   border-top: 1px solid var(--bm-border);
   padding-top: 10px;
 }
+.pop-settings:has(.filter-editor) {
+  width: 440px;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.filter-group.nested {
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--bm-border);
+  background: color-mix(in srgb, var(--bm-fg) 3%, transparent);
+}
+.filter-head, .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-conj {
+  flex: 1;
+}
+.filter-prop {
+  width: 110px;
+  flex: none;
+}
+.filter-op {
+  width: 110px;
+  flex: none;
+}
+.filter-value {
+  flex: 1;
+  min-width: 0;
+}
+.filter-value input {
+  width: 100%;
+}
+.pop-settings button.filter-x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--bm-muted);
+  font-size: 16px;
+}
+.pop-settings button.filter-x:hover {
+  color: var(--bm-danger);
+}
+.filter-add {
+  display: flex;
+  gap: 12px;
+}
+.pop-settings .filter-add button.link {
+  height: auto;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--bm-accent);
+  font-weight: 600;
+}
+.filter-count {
+  font-variant-numeric: tabular-nums;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .card, .floating, .context-menu, .modal, .picker, .ring {

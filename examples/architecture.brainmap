@@ -23,12 +23,17 @@ settings:
       part-of: { color: '#bab0ac', lineStyle: dotted, length: 60 }
   slices:
     - name: Backend only
-      nodeTypes: [service, database]
+      nodeFilter:
+        or:
+          - { property: type, op: is, value: service }
+          - { property: type, op: is, value: database }
     - name: Critical
-      tags: [critical]
+      nodeFilter: { property: tags, op: has, value: critical }
+    - name: Hubs
+      nodeFilter: { property: degree, op: ge, value: 3 }
     - name: Web app dependencies
       roots: [web]
-      edgeTypes: [depends-on]
+      edgeFilter: { property: type, op: is, value: depends-on }
       direction: downstream
 nodes:
   - { id: web, label: Web App, type: app, tags: [critical] }

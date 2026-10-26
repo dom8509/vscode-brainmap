@@ -44,7 +44,18 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   Positions are not saved: the layout arranges the graph each time the file opens.
 - **Hierarchy by dependency type** – pick which connection types build the hierarchy.
 - **Proximity, styling and slices** – spacing, edge length per connection type,
-  colors by type or tag, and saved slices (filter by type, tag, connection type, neighbourhood).
+  colors by type or tag, and saved slices (filters plus a neighbourhood).
+- **Filters** (*Slices ▾* → *+ New slice* or *Edit*) – work like the filters of
+  [Bases](https://github.com/dom8509/vscode-bases): a filter is a property, an operator and a value.
+  Groups combine filters with *All*, *Any* or *None of the following* and can be nested.
+  - Nodes: name, id, type, tags, description, incoming, outgoing, connections
+    (e.g. *connections is 0* finds lonely nodes, *incoming ≥ 5* finds hubs).
+  - Connections: type, tags, label, direction (one-way / two-way).
+    Only kept connections are shown and followed from the start nodes.
+  - Operators: is, is not, contains, does not contain, starts with, has, does not have,
+    is empty, is not empty, >, ≥, <, ≤. Text compares ignore case.
+  - A filter without its value does not filter yet. The editor counts the matches as you type;
+    the *Slices* button shows how many nodes the active slice keeps (`6/10`).
 - **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
   `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
@@ -76,12 +87,18 @@ settings:
       depends-on: { color: '#76b7b2', lineStyle: solid, length: 120 }
   slices:
     - name: Backend
-      nodeTypes: [service, database]
+      nodeFilter:              # and | or | not, nested as deep as you like
+        and:
+          - or:
+              - { property: type, op: is, value: service }
+              - { property: type, op: is, value: database }
+          - { property: tags, op: hasNot, value: legacy }
     - name: Web app dependencies
       roots: [web]
-      edgeTypes: [depends-on]
+      edgeFilter: { property: type, op: is, value: depends-on }
       direction: downstream    # downstream | upstream | both
       depth: 2
+    # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend
   sliceMode: hide              # hide | dim
 nodes:
