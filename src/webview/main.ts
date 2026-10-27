@@ -1149,7 +1149,7 @@ class App {
     this.hints.replaceChildren(
       item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F2', 'rename'), item('#', 'tag'), item('T', 'type'),
       item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'),
-      item('⇧Enter', 'center'), item('Ctrl K', 'search'), item('Esc', 'deselect'),
+      item('⇧Enter', 'center'), item('Ctrl K', 'search'), item('Esc', 'deselect'), item('⇧ drag', 'select several'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
     );
   }

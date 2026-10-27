@@ -191,6 +191,11 @@ export class GraphView {
     const font = cssVar('--vscode-font-family', 'sans-serif');
     return [
       {
+        // Shift+drag on the background draws this frame to select several nodes.
+        selector: 'core',
+        style: { 'selection-box-color': accent, 'selection-box-opacity': 0.1, 'selection-box-border-color': accent, 'selection-box-border-width': 1 } as any,
+      },
+      {
         // The node is an invisible hit box; the HTML card on top draws it.
         selector: 'node',
         style: {
