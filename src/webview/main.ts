@@ -10,6 +10,7 @@ import {
   Slice,
   autoColor,
   cardProperties,
+  choiceKeys,
   emptyMap,
   newId,
   resolveEdgeStyle,
@@ -1335,13 +1336,15 @@ class App {
     const keys = Object.keys(node.data ?? {}).filter((k) => !k.startsWith('file.') || sectionArg(k) !== undefined);
     // A value is a link when it names a note this one connects to by that property, or is a [[link]].
     const linked = (k: string) => this.map.edges.filter((e) => e.source === node.id && e.type === k).map((e) => this.node(e.target)).filter((n): n is BrainNode => !!n);
+    // States get the same colored chips as on the cards.
+    const choices = choiceKeys(this.map.nodes, keys);
     const value = (k: string) => {
       const path = sectionArg(k);
       if (path !== undefined) {
         const t = String(node.data?.[k] ?? '').trim();
         return t ? h('div', { class: /```|~~~/.test(path) ? 'prop-text mono' : 'prop-text' }, t) : h('span', { class: 'muted' }, '—');
       }
-      const values = cardProperties(node, [k], linked)[0] ?? [];
+      const values = cardProperties(node, [k], linked, choices)[0]?.values ?? [];
       if (!values.length) return h('span', { class: 'muted' }, '—');
       const raw = node.data?.[k];
       const list = Array.isArray(raw) || values.length > 1;
@@ -1350,6 +1353,8 @@ class App {
           ? h('a', { class: 'prop-link', href: '#', title: `Open ${v.link ?? v.text}`,
             onclick: (e: Event) => { e.preventDefault(); post({ type: 'open', id: v.target ?? '', link: v.link }); } },
             svgIcon(ICON.link, 11), v.text)
+          : v.color
+          ? h('span', { class: 'prop-chip', style: { color: v.color, background: rgba(v.color, 0.16) } }, v.text)
           : h('span', { class: list ? 'prop-chip' : typeof raw === 'number' ? 'prop-num' : '' }, v.text)));
     };
     const folder = node.id.includes('/') ? node.id.slice(0, node.id.lastIndexOf('/') + 1) : '';

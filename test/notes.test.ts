@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
-import { cardProperties, computeSlice, dataProperties } from '../src/shared/model';
+import { cardProperties, chipColor, choiceKeys, computeSlice, dataProperties } from '../src/shared/model';
 import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote, viewSections } from '../src/shared/notes';
 import { bodyText, keyLabel, sectionId, sectionPath } from '../src/shared/sections';
 
@@ -128,8 +128,8 @@ test('cards show the values of the chosen properties', () => {
   const map = notesToMap([note('a.md', { status: 'done', owner: ['Bob', 'Ann'] }), note('b.md')], view);
   assert.deepEqual(map.settings.style?.cardProperties, ['status', 'owner', 'missing']);
   assert.deepEqual(cardProperties(map.nodes[0], map.settings.style?.cardProperties), [
-    [{ text: 'done' }],
-    [{ text: 'Bob' }, { text: 'Ann' }],
+    { key: 'status', label: 'status', values: [{ text: 'done' }] },
+    { key: 'owner', label: 'owner', values: [{ text: 'Bob' }, { text: 'Ann' }] },
   ]);
   assert.deepEqual(cardProperties(map.nodes[1], map.settings.style?.cardProperties), []);
   // Saved and read back.
@@ -142,7 +142,7 @@ test('a value naming a connected node is a link to it', () => {
   const map = notesToMap(files, view);
   const a = map.nodes.find((n) => n.id === 'a.md')!;
   const linked = (k: string) => map.edges.filter((e) => e.source === a.id && e.type === k).map((e) => map.nodes.find((n) => n.id === e.target)!);
-  assert.deepEqual(cardProperties(a, ['depends-on', 'status'], linked), [
+  assert.deepEqual(cardProperties(a, ['depends-on', 'status'], linked).map((r) => r.values), [
     [{ text: 'api', target: 'lib/api.md' }, { text: 'gone' }],
     // The same name in a property that does not link stays text.
     [{ text: 'api' }],
@@ -154,7 +154,7 @@ test('[[links]] show without brackets and stay links', () => {
   const view = readView({ source: { links: [] }, settings: { style: { cardProperties: ['related'] } } });
   const map = notesToMap([note('a.md', { related: ['[[lib/api|The API]]', '[[gone]]', 'plain'] }), note('lib/api.md')], view);
   const a = map.nodes.find((n) => n.id === 'a.md')!;
-  assert.deepEqual(cardProperties(a, ['related'], () => map.nodes), [[
+  assert.deepEqual(cardProperties(a, ['related'], () => map.nodes).map((r) => r.values), [[
     { text: 'The API', link: 'lib/api', target: 'lib/api.md' },
     { text: 'gone', link: 'gone' },
     { text: 'plain' },
@@ -177,7 +177,26 @@ test('cards can show a part of the note text, as Bases sections', () => {
   const map = notesToMap(files, view, new Map([['a.md', body], ['b.md', 'no headings']]));
   assert.equal(map.nodes[0].data?.[id], 'Given a user');
   assert.equal(map.nodes[1].data?.[id], '');
-  assert.deepEqual(cardProperties(map.nodes[0], view.settings.style?.cardProperties), [[{ text: 'open' }], [{ text: 'Given a user' }]]);
+  assert.deepEqual(cardProperties(map.nodes[0], view.settings.style?.cardProperties).map((r) => [r.label, r.values]), [
+    ['status', [{ text: 'open' }]],
+    ['Text › gherkin block', [{ text: 'Given a user' }]],
+  ]);
   // Without the text nothing is read.
   assert.equal(notesToMap(files, view).nodes[0].data?.[id], undefined);
+});
+
+test('repeating short values are states and get colored chips', () => {
+  const view = readView({ settings: { style: { cardProperties: ['status', 'owner', 'note'] } } });
+  const files = [
+    note('a.md', { status: 'done', owner: 'Ann', note: 'a long free text that is not a state at all' }),
+    note('b.md', { status: 'open', owner: 'Bob', note: 'x' }),
+    note('c.md', { status: 'done', owner: 'Cy', note: 'y' }),
+  ];
+  const map = notesToMap(files, view);
+  // owner never repeats, note has a long text: neither is a state.
+  assert.deepEqual([...choiceKeys(map.nodes, ['status', 'owner', 'note'])], ['status']);
+  assert.equal(chipColor('Done'), chipColor('erledigt'));
+  assert.notEqual(chipColor('done'), chipColor('blocked'));
+  const rows = cardProperties(map.nodes[0], ['status', 'owner'], () => [], new Set(['status']));
+  assert.deepEqual(rows.map((r) => r.values), [[{ text: 'done', color: chipColor('done') }], [{ text: 'Ann' }]]);
 });

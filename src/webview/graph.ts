@@ -12,9 +12,10 @@ import {
   autoColor,
   resolveEdgeStyle,
   cardProperties,
+  choiceKeys,
   resolveNodeStyle,
 } from '../shared/model';
-import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
+import { LARGE_GRAPH, cardHeight } from './cards';
 
 /** From this many shown nodes on, the force layouts give way to a grid. */
 const HUGE_GRAPH = 1500;
@@ -125,7 +126,7 @@ export class GraphView {
       const inside = (n: any, near: boolean) => {
         const b = n.boundingBox({});
         const px = near ? e.target.width() / 2 + 40 : 0;
-        const py = near ? CARD_HEIGHT / 2 + 40 : 0;
+        const py = near ? e.target.height() / 2 + 40 : 0;
         return p.x > b.x1 - px && p.x < b.x2 + px && p.y > b.y1 - py && p.y < b.y2 + py;
       };
       const others = this.cy.nodes().not('.hidden').filter((n) => !n.same(e.target));
@@ -206,13 +207,15 @@ export class GraphView {
         style: {
           shape: 'round-rectangle',
           width: 'data(width)',
-          height: CARD_HEIGHT,
+          height: 'data(height)',
           'background-opacity': 0,
           'border-width': 0,
           label: '',
           'overlay-opacity': 0,
         } as any,
       },
+      // Zoomed out the cards drop their property lines, and the hit boxes follow.
+      { selector: 'node.compact', style: { height: cardHeight(0) } as any },
       {
         selector: 'edge',
         style: {
@@ -274,6 +277,8 @@ export class GraphView {
       const groupBy = map.settings.style?.groupBy ?? 'type';
       // For links on the cards: the nodes each node connects to, by connection type.
       const byId = new Map(map.nodes.map((n) => [n.id, n]));
+      const chosen = map.settings.style?.cardProperties;
+      const choices = choiceKeys(map.nodes, chosen);
       const linked = new Map<string, BrainNode[]>();
       for (const e of map.edges) {
         const t = byId.get(e.target);
@@ -289,6 +294,7 @@ export class GraphView {
         const group = laneOf(n, groupBy);
         const groupStyle = groupBy === 'type' ? map.settings.style?.nodeTypes : groupBy === 'tag' ? map.settings.style?.tags : undefined;
         const groupColor = group ? groupStyle?.[group]?.color ?? autoColor(group) : '';
+        const props = cardProperties(n, chosen, (k) => linked.get(`${n.id}\n${k}`) ?? [], choices);
         const data = {
           id: n.id,
           label,
@@ -300,9 +306,10 @@ export class GraphView {
           groupColor,
           groupName: group ? group.charAt(0).toUpperCase() + group.slice(1) : '',
           tags: n.tags ?? [],
-          props: cardProperties(n, map.settings.style?.cardProperties, (k) => linked.get(`${n.id}\n${k}`) ?? []),
-          // Wide enough for the name, within limits so the graph stays tidy.
-          width: Math.round(Math.max(170, Math.min(260, label.length * 7.4 + 96))),
+          props,
+          height: cardHeight(props.length),
+          // Wide enough for the name, within limits so the graph stays tidy; property lines want a little more.
+          width: Math.round(Math.max(props.length ? 210 : 170, Math.min(260, label.length * 7.4 + 96))),
         };
         const existing = cy.getElementById(n.id);
         if (existing.nonempty()) existing.data(data);
@@ -406,7 +413,7 @@ export class GraphView {
     nodes.forEach((n) => {
       const t = n.data('group') as string | undefined;
       if (t) types.add(t);
-      elements.push({ group: 'nodes', data: { id: n.id(), width: n.data('width'), parent: t ? `__group_${t}` : undefined }, position: { ...n.position() } });
+      elements.push({ group: 'nodes', data: { id: n.id(), width: n.data('width'), height: n.data('height'), parent: t ? `__group_${t}` : undefined }, position: { ...n.position() } });
     });
     types.forEach((t) => elements.push({ group: 'nodes', data: { id: `__group_${t}` } }));
     visible.edges().forEach((e) => {
@@ -417,7 +424,7 @@ export class GraphView {
       styleEnabled: true,
       elements,
       style: [
-        { selector: 'node', style: { width: 'data(width)', height: CARD_HEIGHT, shape: 'rectangle' } as any },
+        { selector: 'node', style: { width: 'data(width)', height: 'data(height)', shape: 'rectangle' } as any },
         { selector: ':parent', style: { padding: 24 } as any },
       ],
     });
@@ -603,7 +610,7 @@ export class GraphView {
             label: String(n.data('label') ?? n.id()),
             lane: laneOf(model.get(n.id()) ?? { id: n.id() }, l.laneBy, order),
             width: n.data('width'),
-            height: CARD_HEIGHT,
+            height: n.data('height'),
           })),
           visible.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
           { axis: l.name === 'typeColumns' ? 'columns' : 'rows', nodeSpacing: Math.max(l.nodeSpacing, 10), laneGap: Math.max(l.edgeLength, 60), order },
@@ -632,7 +639,11 @@ export class GraphView {
           ghosts?.remove();
           settle();
         });
+      // Lay out for the full cards, so zooming in never makes them overlap.
+      const compact = this.cy.nodes('.compact');
+      compact.removeClass('compact');
       layout.run();
+      compact.addClass('compact');
     };
     if (!start || l.name !== 'force') return run();
     // Physics starts from the grouped arrangement: glide there first.
