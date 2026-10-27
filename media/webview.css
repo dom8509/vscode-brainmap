@@ -378,12 +378,12 @@ button:disabled {
   position: absolute;
   left: 0;
   top: 0;
-  height: 64px;
+  height: var(--h, 64px);
   box-sizing: border-box;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
   padding: 0 12px;
+  overflow: hidden;
   transform-origin: 0 0;
   border-radius: var(--bm-radius);
   background: var(--bm-surface);
@@ -459,12 +459,60 @@ button:disabled {
   color: var(--bm-muted);
   flex-shrink: 0;
 }
-.card-props {
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 62px;
+  flex-shrink: 0;
+}
+.card.has-rows .card-head {
+  height: 54px;
+}
+/* one line per property: the name, then the value */
+.card-rows {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  grid-auto-rows: 18px;
+  column-gap: 10px;
+  align-items: center;
   font-size: 11px;
+  padding-top: 1px;
+  border-top: 1px solid color-mix(in srgb, var(--bm-border) 70%, transparent);
+}
+.card-key {
   color: var(--bm-muted);
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-value {
+  display: block;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.card-chip {
+  display: inline-block;
+  vertical-align: 1px;
+  margin-right: 3px;
+  padding: 0 6px;
+  border-radius: 7px;
+  line-height: 14px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+/* zoomed out: name and type only */
+.card-layer.compact .card {
+  height: 64px;
+}
+.card-layer.compact .card.has-rows .card-head {
+  height: 62px;
+}
+.card-layer.compact .card-rows {
+  display: none;
 }
 .card-link {
   pointer-events: auto;
@@ -958,6 +1006,36 @@ button:disabled {
   padding: 1px 8px;
   border-radius: 10px;
   background: color-mix(in srgb, var(--bm-fg) 9%, transparent);
+}
+.prop-text {
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+  line-height: 1.45;
+}
+.prop-text.mono {
+  font-size: 11.5px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bm-fg) 6%, transparent);
+}
+.section-add {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.pop-settings .section-add button.link {
+  align-self: flex-start;
+  height: auto;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--bm-accent);
+  font-weight: 600;
+}
+.section-add .bad {
+  color: var(--vscode-errorForeground, #f48771);
 }
 .prop-num {
   font-variant-numeric: tabular-nums;

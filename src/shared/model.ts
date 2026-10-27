@@ -1,6 +1,7 @@
 // Data model of a .brainmap file. Shared by the extension host and the webview.
 
 import { FilterNode, FilterProperty, FilterValues, makeGroup, matches, prune, readFilter } from './filter';
+import { keyLabel, sectionArg } from './sections';
 
 export interface Position {
   x: number;
@@ -383,15 +384,23 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
   return [...kinds.keys()].sort((a, b) => a.localeCompare(b)).map((k) => {
     const set = kinds.get(k)!;
     const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : set.has('list') ? 'list' : 'text';
-    return { id: `data.${k}`, label: k, kind };
+    return { id: `data.${k}`, label: keyLabel(k), kind };
   });
 }
 
-/** One value on a card; with a target it is a link to that node, with a link a [[link]] to a note by name. */
+/** One value on a card; with a target it is a link to that node, with a link a [[link]] to a note by name, with a color a chip. */
 export interface CardValue {
   text: string;
   target?: string;
   link?: string;
+  color?: string;
+}
+
+/** One line of a card: a property and its values. */
+export interface CardRow {
+  key: string;
+  label: string;
+  values: CardValue[];
 }
 
 /** The names a link can give a node: its id (a path), the file name, its `id` property, its name. */
@@ -402,35 +411,75 @@ function nodeNames(n: BrainNode): string[] {
     .map((x) => String(x).trim().toLowerCase());
 }
 
+/** Common states get the colors people expect; any other value a color of its own. */
+const STATUS_COLORS: [RegExp, string][] = [
+  [/^(done|closed|complete[d]?|finished|resolved|ok|fertig|erledigt|abgeschlossen|approved|freigegeben)$/i, '#3FB950'],
+  [/^(blocked|error|failed|rejected|cancel(l)?ed|blockiert|abgelehnt|fehler)$/i, '#F85149'],
+  [/^(wip|in[ -]?progress|doing|active|review|in[ -]?review|in arbeit|in bearbeitung|started)$/i, '#D29922'],
+  [/^(open|todo|to[ -]do|new|backlog|planned|draft|offen|neu|geplant|entwurf)$/i, '#58A6FF'],
+];
+
+export function chipColor(value: string): string {
+  return STATUS_COLORS.find(([re]) => re.test(value.trim()))?.[1] ?? autoColor(value.trim().toLowerCase());
+}
+
 /**
- * The values of the chosen properties as the card shows them, one list per property;
- * empty ones are left out. `linked(key)` gives the nodes the node connects to by that
- * property: a value naming one of them becomes a link to it.
+ * The properties whose values read best as colored chips: short texts from a small set
+ * that repeat across the nodes, like a status or a priority word.
  */
-export function cardProperties(node: BrainNode, keys: string[] | undefined, linked: (key: string) => BrainNode[] = () => []): CardValue[][] {
+export function choiceKeys(nodes: BrainNode[], keys: string[] | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const k of keys ?? []) {
+    if (sectionArg(k) !== undefined) continue;
+    const values: string[] = [];
+    let ok = true;
+    for (const n of nodes) {
+      const v = n.data?.[k];
+      for (const x of Array.isArray(v) ? v : [v]) {
+        if (x === undefined || x === null || x === '') continue;
+        if (typeof x !== 'string' || x.length > 24 || x.includes('[[')) ok = false;
+        else values.push(x.trim().toLowerCase());
+      }
+      if (!ok) break;
+    }
+    const distinct = new Set(values).size;
+    if (ok && distinct > 0 && distinct <= 12 && distinct < values.length) out.add(k);
+  }
+  return out;
+}
+
+/**
+ * The lines of a card: one per chosen property that has a value. `linked(key)` gives
+ * the nodes the node connects to by that property: a value naming one of them becomes
+ * a link to it. The values of a key in `choices` become colored chips.
+ */
+export function cardProperties(node: BrainNode, keys: string[] | undefined, linked: (key: string) => BrainNode[] = () => [], choices?: Set<string>): CardRow[] {
   const text = (v: unknown) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).trim();
-  return (keys ?? [])
-    .map((k) => {
-      const v = node.data?.[k];
-      const targets = linked(k);
-      const find = (name: string) => targets.find((n) => nodeNames(n).includes(name.toLowerCase()))?.id;
-      return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).flatMap((t): CardValue[] => {
-        // "[[api]]" or "[[lib/api|The API]]" shows its name (or alias) and stays a link.
-        const links = [...t.matchAll(/\[\[([^\]|#\n]+)[^\]|\n]*(?:\|([^\]\n]+))?\]\]/g)];
-        if (!links.length) {
-          const target = find(t);
-          return [target ? { text: t, target } : { text: t }];
-        }
-        return links.map((m) => {
-          const name = m[1].trim();
-          const value: CardValue = { text: (m[2] ?? name.split('/').pop()!).trim(), link: name };
-          const target = find(name) ?? find(name.split('/').pop()!.replace(/\.md$/i, ''));
-          if (target) value.target = target;
-          return value;
-        });
+  const values = (k: string): CardValue[] => {
+    const v = node.data?.[k];
+    // A part of the note's text stays text, [[links]] and all.
+    if (sectionArg(k) !== undefined) return typeof v === 'string' && v.trim() ? [{ text: v.trim() }] : [];
+    const targets = linked(k);
+    const find = (name: string) => targets.find((n) => nodeNames(n).includes(name.toLowerCase()));
+    return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).flatMap((t): CardValue[] => {
+      // "[[api]]" or "[[lib/api|The API]]" shows its name (or alias) and stays a link.
+      const links = [...t.matchAll(/\[\[([^\]|#\n]+)[^\]|\n]*(?:\|([^\]\n]+))?\]\]/g)];
+      if (!links.length) {
+        const target = find(t);
+        // A link shows the name of the node it goes to.
+        if (target) return [{ text: target.label || t, target: target.id }];
+        return [choices?.has(k) ? { text: t, color: chipColor(t) } : { text: t }];
+      }
+      return links.map((m) => {
+        const name = m[1].trim();
+        const target = find(name) ?? find(name.split('/').pop()!.replace(/\.md$/i, ''));
+        const value: CardValue = { text: (m[2] ?? (target?.label || name.split('/').pop()!)).trim(), link: name };
+        if (target) value.target = target.id;
+        return value;
       });
-    })
-    .filter((values) => values.length > 0);
+    });
+  };
+  return (keys ?? []).map((key) => ({ key, label: keyLabel(key), values: values(key) })).filter((r) => r.values.length > 0);
 }
 
 export function edgeValues(e: BrainEdge): FilterValues {

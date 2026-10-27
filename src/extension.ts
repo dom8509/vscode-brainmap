@@ -2,7 +2,8 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { BasesApi, bases } from './bases';
 import { detectFormat, parse, parseView, serialize, serializeView } from './shared/format';
-import { linkCandidates, notesToMap, resolveNote } from './shared/notes';
+import { NoteFile, linkCandidates, notesToMap, resolveNote, viewSections } from './shared/notes';
+import { bodyText } from './shared/sections';
 import { FileFormat, applyGlobalFilter, emptyMap, filterOptions } from './shared/model';
 import { HostMessage, WebviewMessage } from './shared/messages';
 
@@ -127,15 +128,43 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
     /** Node id (the note's path) → the note's URI, for opening it. */
     let uris = new Map<string, string>();
 
-    const send = () => {
+    /** Note URI → its text below the frontmatter, read for the cards' sections. */
+    const bodyCache = new Map<string, { mtime?: number; body: string }>();
+    let sent = 0;
+
+    /** The text of each Markdown note by path: from its editor when open, else from disk (cached by mtime). */
+    const readBodies = async (files: NoteFile[]) => {
+      const open = new Map(vscode.workspace.textDocuments.map((d) => [d.uri.toString(), d]));
+      const out = new Map<string, string>();
+      await Promise.all(files.filter((f) => f.kind === 'markdown').map(async (f) => {
+        const doc = open.get(f.uri);
+        if (doc) return out.set(f.path, bodyText(doc.getText()));
+        const cached = bodyCache.get(f.uri);
+        if (cached && cached.mtime !== undefined && cached.mtime === f.mtime) return out.set(f.path, cached.body);
+        try {
+          const body = bodyText(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.parse(f.uri))).toString('utf8'));
+          bodyCache.set(f.uri, { mtime: f.mtime, body });
+          out.set(f.path, body);
+        } catch {
+          // A note that cannot be read shows no section.
+        }
+      }));
+      return out;
+    };
+
+    const send = async () => {
       if (!api) return;
+      const run = ++sent;
       const text = document.getText();
       try {
         const files = api.files();
         uris = new Map(files.map((f) => [f.path, f.uri]));
         // Notes outside the global filter never reach the webview.
         const view = parseView(text);
-        const all = notesToMap(files, view);
+        // Only when the cards show parts of the notes' text is it read.
+        const bodies = viewSections(view).length ? await readBodies(files) : undefined;
+        if (run !== sent) return;
+        const all = notesToMap(files, view, bodies);
         const map = applyGlobalFilter(all);
         const links = { chosen: view.source.links, properties: linkCandidates(files, view) };
         post({ type: 'load', map, format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path), readOnly: true, options: filterOptions(all), links });
@@ -180,14 +209,15 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
           const text = document.getText();
           const view = parseView(text);
           const filterChanged = JSON.stringify(view.settings.filter) !== JSON.stringify(msg.map.settings.filter);
+          const sectionsBefore = JSON.stringify(viewSections(view));
           view.title = msg.map.title;
           view.settings = msg.map.settings;
           const next = serializeView(view, detectFormat(text, defaultFormat));
           if (next === text) return;
           lastWritten = next;
           await replaceText(document, next);
-          // Another global filter loads other notes.
-          if (filterChanged) send();
+          // Another global filter loads other notes; other sections read other parts of them.
+          if (filterChanged || JSON.stringify(viewSections(view)) !== sectionsBefore) send();
           break;
         }
         case 'setLinks': {

@@ -4,6 +4,7 @@
 // nodes and their links become connections. Plain TypeScript for the tests.
 
 import { BrainEdge, BrainMap, BrainNode, normalize } from './model';
+import { sectionArg, sectionPath } from './sections';
 
 /** A file as the Bases extension shares it (BasesFile in vscode-bases/src/host/api.ts). */
 export interface NoteFile {
@@ -13,6 +14,7 @@ export interface NoteFile {
   basename: string;
   folder: string;
   kind: 'markdown' | 'yaml';
+  mtime?: number;
   properties: Record<string, unknown>;
   tags: string[];
   /** Resolved links: the text's have type "", the link database's their own. */
@@ -146,13 +148,18 @@ function plain(value: unknown): unknown {
   return JSON.stringify(value);
 }
 
+/** The parts of the notes' text the view's cards show (file.section("...")). */
+export function viewSections(view: BrainView): string[] {
+  return (view.settings.style?.cardProperties ?? []).filter((k) => sectionArg(k) !== undefined);
+}
+
 /**
  * The graph of a view: one node per note (its path is its id), one connection per
  * link between two shown notes. A [[link]] in a property is a connection of that
  * property's name, e.g. `depends-on: [[api]]`; a link in the text has no type.
  * With `source.links` only the properties listed there connect, and plain names count too.
  */
-export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
+export function notesToMap(files: NoteFile[], view: BrainView, bodies?: Map<string, string>): BrainMap {
   const notes = files.filter((f) => isNote(f, view.source.folders));
   const shown = new Set(notes.map((n) => n.path));
   const resolve = makeResolver(files.filter((f) => f.kind === 'markdown'));
@@ -161,6 +168,8 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   // These are the node's own type, tags and description; every other property is data to filter on.
   const used = new Set([typeKey, 'tags', 'tag', 'description']);
   const chosen = view.source.links && new Set(view.source.links);
+  // The text below the frontmatter, by path, when the cards show parts of it.
+  const sections = bodies ? viewSections(view) : [];
 
   const nodes: BrainNode[] = [];
   const edges: BrainEdge[] = [];
@@ -189,6 +198,10 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
       for (const l of links) connect(f.path, resolve(l), k);
       // A link filters by the name it names: `depends-on has api`.
       data[k] = links.length ? links : plain(v) ?? '';
+    }
+    for (const id of sections) {
+      const body = bodies!.get(f.path);
+      data[id] = (body !== undefined && sectionPath(body, sectionArg(id)!)) || '';
     }
     // The file's own fields, as Bases has them.
     data['file.name'] = f.basename;

@@ -1,15 +1,26 @@
 import type { Core, NodeSingular } from 'cytoscape';
-import type { CardValue } from '../shared/model';
+import type { CardRow, CardValue } from '../shared/model';
 import { h } from './dom';
 import { HullPart, Rect, hullParts } from './hulls';
 
-/** Card height in model units. Width comes from the node's `width` data. */
+/** Card height in model units without property lines. Width comes from the node's `width` data. */
 export const CARD_HEIGHT = 64;
+/** With property lines: the head gets a little shorter and each line adds this much. */
+const HEAD_WITH_ROWS = 54;
+const ROW_HEIGHT = 18;
+const ROWS_PAD = 10;
+
+/** The full height of a card with `rows` property lines (its border included). */
+export function cardHeight(rows: number): number {
+  return rows ? 2 + HEAD_WITH_ROWS + rows * ROW_HEIGHT + ROWS_PAD : CARD_HEIGHT;
+}
 /** Space around the cards of a group; more on top for the group's name. */
 const HULL_PAD = 24;
 const HULL_TOP = 34;
 /** Below this zoom cards collapse to colored blocks and groups show big names. */
 const LOD_ZOOM = 0.45;
+/** Below this zoom cards hide their property lines and take their plain height. */
+const DETAIL_ZOOM = 0.7;
 /**
  * From this many shown nodes on, the graph takes the fast path: the force layouts
  * run once (fCoSE, draft quality, no grouped start) instead of live physics, and
@@ -114,6 +125,12 @@ export class CardLayer {
     const low = this.simplify && zoom < LOD_ZOOM;
     this.cardLayer.classList.toggle('lod-low', low);
     this.hullLayer.classList.toggle('lod-low', low);
+    // Too small to read, property lines go away and the cards (and their hit boxes) shrink.
+    const compact = this.simplify && zoom < DETAIL_ZOOM;
+    if (compact !== this.cardLayer.classList.contains('compact')) {
+      this.cardLayer.classList.toggle('compact', compact);
+      cy.batch(() => (compact ? cy.nodes().addClass('compact') : cy.nodes().removeClass('compact')));
+    } else if (compact) cy.nodes().not('.compact').addClass('compact');
 
     const seen = new Set<string>();
     cy.nodes().forEach((n) => {
@@ -127,7 +144,7 @@ export class CardLayer {
       const p = n.position();
       const w = n.data('width') as number;
       const x = (p.x - w / 2) * zoom + pan.x;
-      const y = (p.y - CARD_HEIGHT / 2) * zoom + pan.y;
+      const y = (p.y - n.height() / 2) * zoom + pan.y;
       card.el.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
       const cls = card.el.classList;
       cls.toggle('sel', n.selected());
@@ -159,8 +176,9 @@ export class CardLayer {
 
   private updateContent(card: Card, n: NodeSingular) {
     const d = n.data();
+    const rows: CardRow[] = d.props ?? [];
     // Tags stay off the card to keep it calm; the hover card and details show them.
-    const sig = [d.label, d.type, d.typeName, JSON.stringify(d.props), d.color, d.width].join('|');
+    const sig = [d.label, d.type, d.typeName, JSON.stringify(rows), d.color, d.width].join('|');
     if (sig === card.sig || this.editing === n.id()) return;
     card.sig = sig;
     const color: string = d.color;
@@ -170,41 +188,44 @@ export class CardLayer {
     else tile.textContent = (d.label || '?').trim().charAt(0).toUpperCase();
     card.label = h('span', { class: 'card-label' }, d.label);
     card.el.style.width = `${d.width}px`;
+    card.el.style.setProperty('--h', `${cardHeight(rows.length)}px`);
     card.el.style.setProperty('--c', color);
+    card.el.classList.toggle('has-rows', rows.length > 0);
     card.el.replaceChildren(
-      tile,
-      h('span', { class: 'card-text' },
-        card.label,
-        (d.typeName || d.props?.length > 0) && h('span', { class: 'card-meta' },
-          d.typeName && h('span', { class: 'card-type' }, d.typeName),
-          d.props?.length > 0 && this.props(d.props, !!d.typeName),
+      h('div', { class: 'card-head' },
+        tile,
+        h('span', { class: 'card-text' },
+          card.label,
+          d.typeName && h('span', { class: 'card-meta' }, h('span', { class: 'card-type' }, d.typeName)),
         ),
       ),
+      ...(rows.length ? [h('div', { class: 'card-rows' }, rows.flatMap((r) => [
+        h('span', { class: 'card-key', title: r.label }, r.label),
+        this.values(r.values),
+      ]))] : []),
     );
   }
 
-  /** The chosen properties: values with " · " between properties, ", " within a list; links can be clicked. */
-  private props(props: CardValue[][], afterType: boolean): HTMLElement {
-    const parts: (string | HTMLElement)[] = afterType ? ['· '] : [];
-    props.forEach((values, i) => {
-      if (i) parts.push(' · ');
-      values.forEach((v, j) => {
-        if (j) parts.push(', ');
-        if (!v.target && !v.link) return parts.push(v.text);
-        parts.push(h('a', {
-          class: 'card-link',
-          href: '#',
-          title: 'Open',
-          onmousedown: (e: Event) => e.stopPropagation(),
-          onclick: (e: MouseEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-            this.onLink?.(v);
-          },
-        }, v.text));
-      });
+  /** The values of one line: chips for states, links that open their note, else text. */
+  private values(values: CardValue[]): HTMLElement {
+    const parts: (string | HTMLElement)[] = [];
+    values.forEach((v, j) => {
+      if (v.color) return parts.push(h('span', { class: 'card-chip', style: { color: v.color, background: rgba(v.color, 0.16) } }, v.text));
+      if (j && !values[j - 1].color) parts.push(', ');
+      if (!v.target && !v.link) return parts.push(v.text);
+      parts.push(h('a', {
+        class: 'card-link',
+        href: '#',
+        title: 'Open',
+        onmousedown: (e: Event) => e.stopPropagation(),
+        onclick: (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.onLink?.(v);
+        },
+      }, v.text));
     });
-    return h('span', { class: 'card-props' }, ...parts);
+    return h('span', { class: 'card-value' }, ...parts);
   }
 
   /** Turns the card's name into a text field. `done` gets the text and the key that ended editing. */
@@ -249,7 +270,8 @@ export class CardLayer {
         if (n.hasClass('hidden')) return;
         const p = n.position();
         const w = n.data('width') / 2;
-        const card = { x1: p.x - w, y1: p.y - CARD_HEIGHT / 2, x2: p.x + w, y2: p.y + CARD_HEIGHT / 2 };
+        const hh = n.height() / 2;
+        const card = { x1: p.x - w, y1: p.y - hh, x2: p.x + w, y2: p.y + hh };
         const type = n.data('group') as string;
         all.push({ type: type ?? '', card });
         if (!type) return;
@@ -345,7 +367,7 @@ export class CardLayer {
     nodes.forEach((n) => {
       const p = n.position();
       const w = n.data('width') * scale;
-      const hgt = Math.max(3, CARD_HEIGHT * scale);
+      const hgt = Math.max(3, n.height() * scale);
       ctx.globalAlpha = n.hasClass('fdim') || n.hasClass('dimmed') ? 0.3 : 1;
       ctx.fillStyle = n.data('color');
       ctx.beginPath();
