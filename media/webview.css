@@ -1759,3 +1759,52 @@ button:disabled {
   background: var(--bm-accent-bg);
   color: var(--bm-accent-fg);
 }
+.link-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+/* The slice settings' ⋯ menu: default, duplicate, delete, as in Bases. */
+.menu-default {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  opacity: 0.8;
+  background: color-mix(in srgb, var(--bm-fg) 10%, transparent);
+}
+.slice-more {
+  position: relative;
+}
+.pop-settings button.panel-close.active {
+  color: var(--bm-fg);
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+.slice-more-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 260px;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--bm-border));
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, var(--bm-fg));
+  background: var(--vscode-menu-background, var(--bm-surface));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.slice-more-menu button.menu-row {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.slice-more-menu button.menu-row:hover {
+  color: var(--vscode-menu-selectionForeground, var(--bm-accent-fg));
+  background: var(--vscode-menu-selectionBackground, var(--bm-accent-bg));
+}
+.slice-more-menu .menu-row.danger {
+  color: var(--vscode-errorForeground, #e15759);
+}

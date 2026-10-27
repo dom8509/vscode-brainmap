@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectFormat, parse, serialize } from '../src/shared/format';
-import { computeSlice, normalize, resolveNodeStyle } from '../src/shared/model';
+import { computeSlice, normalize, openingSlice, resolveNodeStyle } from '../src/shared/model';
 
 const yamlText = `
 title: Demo
@@ -98,4 +98,28 @@ test('positions are not kept and the old manual layout falls back to force', () 
   assert.equal(m.settings.layout?.name, 'force');
   assert.equal('position' in m.nodes[0], false);
   assert.ok(!serialize(m, 'yaml').includes('position'));
+});
+
+test('slices hide orphans or show only them', () => {
+  const map = normalize({
+    nodes: [{ id: 'a', type: 'x' }, { id: 'b', type: 'x' }, { id: 'c', type: 'y' }, { id: 'd', type: 'x' }],
+    edges: [{ id: 'e1', source: 'a', target: 'b', type: 'uses' }, { id: 'e2', source: 'a', target: 'c', type: 'owns' }],
+  });
+  const ids = (s: object) => [...computeSlice(map, { name: 's', ...s }).nodes].sort();
+  assert.deepEqual(ids({ orphans: 'hide' }), ['a', 'b', 'c']);
+  assert.deepEqual(ids({ orphans: 'only' }), ['d']);
+  assert.equal(computeSlice(map, { name: 's', orphans: 'only' }).edges.size, 0);
+  // Orphans count in the slice: without type y, nothing is left to c; with only uses kept, c has no connection.
+  assert.deepEqual(ids({ orphans: 'only', edgeFilter: { property: 'type', op: 'is', value: 'uses' } }), ['c', 'd']);
+  assert.deepEqual(ids({ orphans: 'hide', nodeFilter: { property: 'type', op: 'is', value: 'x' } }), ['a', 'b']);
+  // An unknown value does nothing.
+  assert.deepEqual(ids({ orphans: 'maybe' }), ['a', 'b', 'c', 'd']);
+});
+
+test('a file opens with its default slice, else the one shown last', () => {
+  const slices = [{ name: 'A' }, { name: 'B' }];
+  assert.equal(openingSlice({ slices, activeSlice: 'A', defaultSlice: 'B' }), 'B');
+  assert.equal(openingSlice({ slices, activeSlice: 'A' }), 'A');
+  assert.equal(openingSlice({ slices, activeSlice: 'A', defaultSlice: 'gone' }), 'A');
+  assert.equal(openingSlice({ slices, activeSlice: 'gone' }), undefined);
 });

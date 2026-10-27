@@ -128,6 +128,11 @@ export interface Slice {
   expand?: boolean;
   /** Mark the nodes that match the node filter. */
   highlight?: boolean;
+  /**
+   * Nodes without a connection in the slice: 'hide' leaves them out, 'only' shows
+   * nothing else. Left out: they show like any other node.
+   */
+  orphans?: 'hide' | 'only';
 }
 
 export interface Settings {
@@ -138,6 +143,8 @@ export interface Settings {
   slices?: Slice[];
   /** Name of the slice currently shown. */
   activeSlice?: string;
+  /** Name of the slice the file opens with. Left out: it opens with the slice shown last. */
+  defaultSlice?: string;
   /** 'hide' removes nodes outside the slice, 'dim' greys them out. */
   sliceMode?: 'hide' | 'dim';
 }
@@ -250,6 +257,7 @@ function readSlice(raw: Slice): Slice {
   if (list(tags).length) nodeParts.push(anyOf('tags', 'has', list(tags)));
   const oldEdges = list(edgeTypes).length ? anyOf('type', 'is', list(edgeTypes)) : undefined;
   const slice: Slice = { ...rest, name: String(raw.name) };
+  if (slice.orphans !== 'hide' && slice.orphans !== 'only') delete slice.orphans;
   const nf = readFilter(nodeFilter) ?? (nodeParts.length ? makeGroup('and', nodeParts) : undefined);
   const ef = readFilter(edgeFilter) ?? (oldEdges ? makeGroup('and', [oldEdges]) : undefined);
   if (nf) slice.nodeFilter = nf;
@@ -397,6 +405,13 @@ export function tidySlice(slice: Slice): Slice {
   return out;
 }
 
+/** The slice a file opens with: its default slice while that exists, else the one shown last. */
+export function openingSlice(settings: Settings): string | undefined {
+  const names = new Set((settings.slices ?? []).map((s) => s.name));
+  if (settings.defaultSlice && names.has(settings.defaultSlice)) return settings.defaultSlice;
+  return settings.activeSlice && names.has(settings.activeSlice) ? settings.activeSlice : undefined;
+}
+
 /** Computes which nodes and edges belong to a slice. */
 export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
   const slice = readSlice(raw);
@@ -443,9 +458,16 @@ export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
     nodes = reached;
   }
 
-  const edges = new Set(
+  let edges = new Set(
     candidateEdges.filter((e) => nodes.has(e.source) && nodes.has(e.target)).map((e) => e.id),
   );
+  // A node is an orphan when none of the slice's connections touch it.
+  if (slice.orphans) {
+    const linked = new Set<string>();
+    for (const e of candidateEdges) if (edges.has(e.id)) linked.add(e.source).add(e.target);
+    nodes = new Set([...nodes].filter((id) => linked.has(id) === (slice.orphans === 'hide')));
+    if (slice.orphans === 'only') edges = new Set();
+  }
   const marked = prune(slice.nodeFilter) ? new Set([...matched].filter((id) => nodes.has(id))) : new Set<string>();
   return { nodes, edges, matches: marked };
 }
