@@ -80,8 +80,8 @@ export class CardLayer {
   groups = true;
   /** Zoomed far out, cards turn into plain blocks without text. */
   simplify = true;
-  /** A link on a card was clicked; `open` with Ctrl or Cmd held. */
-  onLink?: (id: string, open: boolean) => void;
+  /** A link on a card was clicked. */
+  onLink?: (id: string) => void;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
     this.hullSvg.setAttribute('class', 'hull-svg');
@@ -195,12 +195,12 @@ export class CardLayer {
         parts.push(h('a', {
           class: 'card-link',
           href: '#',
-          title: 'Go to this node · Ctrl/Cmd+click: open it',
+          title: 'Open',
           onmousedown: (e: Event) => e.stopPropagation(),
           onclick: (e: MouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
-            this.onLink?.(target, e.ctrlKey || e.metaKey);
+            this.onLink?.(target);
           },
         }, v.text));
       });

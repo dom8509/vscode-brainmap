@@ -230,8 +230,9 @@ class App {
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
-    this.cards.onLink = (id, open) => {
-      if (open && this.readOnly) return this.openNote(id);
+    // A .brainview opens the linked note; a .brainmap has no notes and goes to the node.
+    this.cards.onLink = (id) => {
+      if (this.readOnly) return this.openNote(id);
       this.graph.select([id]);
       this.graph.showElements([id]);
     };
