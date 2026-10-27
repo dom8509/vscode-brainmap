@@ -634,11 +634,6 @@ class App {
     this.commit({ popup: true });
   }
 
-  private centerView() {
-    if (this.selection.length) this.graph.centerOn(this.selection);
-    else this.graph.fit();
-  }
-
   private onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
@@ -678,9 +673,7 @@ class App {
         else return;
         break;
       case 'Enter':
-        // Shift+Enter centers the view (on the selection, if any).
-        if (e.shiftKey) this.centerView();
-        else if (one) this.addSibling(one);
+        if (one) this.addSibling(one);
         else if (!this.map.nodes.length) this.createFirstNode();
         else return;
         break;
@@ -1149,7 +1142,7 @@ class App {
     this.hints.replaceChildren(
       item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F2', 'rename'), item('#', 'tag'), item('T', 'type'),
       item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'),
-      item('⇧Enter', 'center'), item('Ctrl K', 'search'), item('Esc', 'deselect'), item('⇧ drag', 'select several'),
+      item('Ctrl K', 'search'), item('Esc', 'deselect'), item('⇧ drag', 'select several'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
     );
   }
