@@ -230,6 +230,11 @@ class App {
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
+    this.cards.onLink = (id, open) => {
+      if (open && this.readOnly) return this.openNote(id);
+      this.graph.select([id]);
+      this.graph.showElements([id]);
+    };
     this.graph.groupLayout = this.cards.groups;
     this.renderEmpty();
     this.renderHints();

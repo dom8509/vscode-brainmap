@@ -126,8 +126,24 @@ test('cards show the values of the chosen properties', () => {
   const view = readView({ settings: { style: { cardProperties: ['status', 'owner', 'missing'] } } });
   const map = notesToMap([note('a.md', { status: 'done', owner: ['Bob', 'Ann'] }), note('b.md')], view);
   assert.deepEqual(map.settings.style?.cardProperties, ['status', 'owner', 'missing']);
-  assert.equal(cardProperties(map.nodes[0], map.settings.style?.cardProperties), 'done · Bob, Ann');
-  assert.equal(cardProperties(map.nodes[1], map.settings.style?.cardProperties), '');
+  assert.deepEqual(cardProperties(map.nodes[0], map.settings.style?.cardProperties), [
+    [{ text: 'done' }],
+    [{ text: 'Bob' }, { text: 'Ann' }],
+  ]);
+  assert.deepEqual(cardProperties(map.nodes[1], map.settings.style?.cardProperties), []);
   // Saved and read back.
   assert.deepEqual(parseView(serializeView(view, 'yaml')).settings.style?.cardProperties, ['status', 'owner', 'missing']);
+});
+
+test('a value naming a connected node is a link to it', () => {
+  const view = readView({ settings: { style: { cardProperties: ['depends-on', 'status'] } } });
+  const files = [note('a.md', { 'depends-on': ['[[api]]', '[[gone]]'], status: 'api' }), note('lib/api.md')];
+  const map = notesToMap(files, view);
+  const a = map.nodes.find((n) => n.id === 'a.md')!;
+  const linked = (k: string) => map.edges.filter((e) => e.source === a.id && e.type === k).map((e) => map.nodes.find((n) => n.id === e.target)!);
+  assert.deepEqual(cardProperties(a, ['depends-on', 'status'], linked), [
+    [{ text: 'api', target: 'lib/api.md' }, { text: 'gone' }],
+    // The same name in a property that does not link stays text.
+    [{ text: 'api' }],
+  ]);
 });

@@ -466,6 +466,15 @@ button:disabled {
   text-overflow: ellipsis;
   min-width: 0;
 }
+.card-link {
+  pointer-events: auto;
+  color: var(--bm-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.card-link:hover {
+  text-decoration: underline;
+}
 .card-input {
   pointer-events: auto;
   width: 100%;
