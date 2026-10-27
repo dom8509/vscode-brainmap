@@ -94,7 +94,10 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
   or a row of Bases' link database (with its type).
 - **Show properties on the cards** (*Style* → *Properties on cards*): pick properties, e.g. `status`
   or `owner`; their values show on each card under the name. A value that links to a shown note is a link:
-  click it to open that note.
+  click it to open that note. *+ Add section…* shows a part of each note's text, as Bases' sections do:
+  headings from the outside in, separated by `>`, maybe ending in a code block — `Text > Details`,
+  ```` Text > ```gherkin ```` (the first `gherkin` block in *Text*), ```` ```text[2] ```` (the second `text` block).
+  Saved as `file.section("…")` in `cardProperties`; the details panel shows the whole part.
 - **Pick which properties link** (*Style* → *Links from properties*): by default every property with a `[[link]]`
   connects. Set *Connect notes by* to *Only the properties below* and add them from the *+ Add property…* list
   (× removes one): only those connect, and plain

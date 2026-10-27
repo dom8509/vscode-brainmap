@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
 import { cardProperties, computeSlice, dataProperties } from '../src/shared/model';
-import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote } from '../src/shared/notes';
+import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote, viewSections } from '../src/shared/notes';
+import { bodyText, keyLabel, sectionId, sectionPath } from '../src/shared/sections';
 
 const note = (path: string, properties: Record<string, unknown> = {}, links: string[] = [], tags: string[] = []): NoteFile => {
   const name = path.split('/').pop()!;
@@ -159,4 +160,24 @@ test('[[links]] show without brackets and stay links', () => {
     { text: 'plain' },
   ]]);
   assert.equal(resolveNote([note('a.md'), note('lib/api.md')], 'api'), 'lib/api.md');
+});
+
+test('cards can show a part of the note text, as Bases sections', () => {
+  const body = '# Intro\nHello\n\n## Text\nShort.\n\n### Details\nMore here.\n```gherkin\nGiven a user\n```\n## Other\nx';
+  assert.equal(sectionPath(body, 'Text > Details'), 'More here.\n```gherkin\nGiven a user\n```');
+  assert.equal(sectionPath(body, 'Text > ```gherkin'), 'Given a user');
+  assert.equal(sectionPath(body, 'Missing'), undefined);
+  assert.equal(keyLabel(sectionId('Text > ```gherkin')), 'Text › gherkin block');
+  assert.equal(bodyText('---\ntitle: a\n---\n# H\nx'), '# H\nx');
+
+  const id = sectionId('Text > ```gherkin');
+  const view = readView({ settings: { style: { cardProperties: ['status', id] } } });
+  assert.deepEqual(viewSections(view), [id]);
+  const files = [note('a.md', { status: 'open' }), note('b.md')];
+  const map = notesToMap(files, view, new Map([['a.md', body], ['b.md', 'no headings']]));
+  assert.equal(map.nodes[0].data?.[id], 'Given a user');
+  assert.equal(map.nodes[1].data?.[id], '');
+  assert.deepEqual(cardProperties(map.nodes[0], view.settings.style?.cardProperties), [[{ text: 'open' }], [{ text: 'Given a user' }]]);
+  // Without the text nothing is read.
+  assert.equal(notesToMap(files, view).nodes[0].data?.[id], undefined);
 });

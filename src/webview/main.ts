@@ -25,6 +25,7 @@ import {
 } from '../shared/model';
 import { FilterNode, countConditions, describeFilter, prune } from '../shared/filter';
 import { filterEditor } from './filterEditor';
+import { keyLabel, parsePath, sectionArg, sectionId } from '../shared/sections';
 import { BarSettings, HostMessage, LinkSettings, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, LARGE_GRAPH, rgba } from './cards';
@@ -1331,10 +1332,15 @@ class App {
 
   /** A note in a .brainview: what its file says, to read; the button opens it. */
   private noteDetails(node: BrainNode): (HTMLElement | false)[] {
-    const keys = Object.keys(node.data ?? {}).filter((k) => !k.startsWith('file.'));
+    const keys = Object.keys(node.data ?? {}).filter((k) => !k.startsWith('file.') || sectionArg(k) !== undefined);
     // A value is a link when it names a note this one connects to by that property, or is a [[link]].
     const linked = (k: string) => this.map.edges.filter((e) => e.source === node.id && e.type === k).map((e) => this.node(e.target)).filter((n): n is BrainNode => !!n);
     const value = (k: string) => {
+      const path = sectionArg(k);
+      if (path !== undefined) {
+        const t = String(node.data?.[k] ?? '').trim();
+        return t ? h('div', { class: /```|~~~/.test(path) ? 'prop-text mono' : 'prop-text' }, t) : h('span', { class: 'muted' }, '—');
+      }
       const values = cardProperties(node, [k], linked)[0] ?? [];
       if (!values.length) return h('span', { class: 'muted' }, '—');
       const raw = node.data?.[k];
@@ -1360,7 +1366,7 @@ class App {
       !!node.description && h('p', { class: 'note-desc' }, node.description),
       keys.length > 0 && h('div', { class: 'section' },
         h('div', { class: 'section-title' }, 'Properties', h('span', { class: 'count' }, String(keys.length))),
-        h('div', { class: 'props' }, keys.flatMap((k) => [h('span', { class: 'prop-key', title: k }, k), h('div', { class: 'prop-value' }, value(k))])),
+        h('div', { class: 'props' }, keys.flatMap((k) => [h('span', { class: 'prop-key', title: sectionArg(k) ?? k }, keyLabel(k)), h('div', { class: 'prop-value' }, value(k))])),
       ),
       this.connections(node),
       h('div', { class: 'note-file', title: node.id }, h('span', { class: 'muted' }, folder), node.id.slice(folder.length)),
@@ -1711,23 +1717,50 @@ class App {
     );
   }
 
-  /** Which properties show on the cards. Saved as `style.cardProperties`. */
+  /** Which properties, and in a .brainview which parts of the notes' text, show on the cards. Saved as `style.cardProperties`. */
   private cardPropertiesPanel(): HTMLElement | false {
     const style = (this.map.settings.style ??= {});
-    const all = dataProperties(this.map).map((p) => p.label);
+    const all = dataProperties(this.map).map((p) => p.id.slice(5)).filter((k) => sectionArg(k) === undefined);
     const chosen = style.cardProperties ?? [];
-    if (!all.length && !chosen.length) return false;
+    if (!all.length && !chosen.length && !this.readOnly) return false;
     const set = (next: string[]) => {
       style.cardProperties = next.length ? next : undefined;
       this.commit();
     };
     const rest = all.filter((p) => !chosen.includes(p));
+    // A part of the note's text, as Bases' "Add section": headings, then maybe a code block.
+    const sectionInput = () => {
+      const error = h('span', { class: 'muted small' }, 'Headings from the outside in, separated by >. End with ```text for the first text code block in it, ``` for any block, ```text[2] for the second.');
+      const input = h('input', { placeholder: 'e.g. Text > Details > ```text', class: 'mono', 'aria-label': 'Section path',
+        onkeydown: (e: KeyboardEvent) => {
+          e.stopPropagation();
+          // The panel does not redraw under a focused field.
+          if (e.key === 'Escape') return input.blur(), this.renderSettings();
+          if (e.key !== 'Enter') return;
+          const path = input.value.trim();
+          try {
+            if (!path) throw new Error('Name a heading or a code block');
+            parsePath(path);
+          } catch (err) {
+            error.textContent = (err as Error).message;
+            error.classList.add('bad');
+            return;
+          }
+          const id = sectionId(path);
+          input.blur();
+          set(chosen.includes(id) ? chosen : [...chosen, id]);
+        } });
+      box.replaceChildren(input, error);
+      input.focus();
+    };
+    const box = h('div', { class: 'section-add' },
+      this.readOnly && h('button', { class: 'link', title: 'A part of each note: the text under a heading, or a code block', onclick: sectionInput }, '+ Add section…'));
     return h('div', {},
       h('h4', {}, 'Properties on cards'),
       h('div', { class: 'link-props' },
         chosen.length
-          ? chosen.map((p) => h('span', { class: 'chip' }, p,
-            h('button', { class: 'chip-x', title: `Remove ${p}`, 'aria-label': `Remove ${p}`, onclick: () => set(chosen.filter((x) => x !== p)) }, '×')))
+          ? chosen.map((p) => h('span', { class: 'chip', title: sectionArg(p) ?? p }, keyLabel(p),
+            h('button', { class: 'chip-x', title: `Remove ${keyLabel(p)}`, 'aria-label': `Remove ${keyLabel(p)}`, onclick: () => set(chosen.filter((x) => x !== p)) }, '×')))
           : h('span', { class: 'muted small' }, 'None: cards show the name and type.'),
       ),
       rest.length > 0 && select(
@@ -1736,6 +1769,7 @@ class App {
         (v) => v && set([...chosen, v]),
         { 'aria-label': 'Add a property to the cards', title: 'Its value shows on each card, under the name' },
       ),
+      box,
     );
   }
 

@@ -1,6 +1,7 @@
 // Data model of a .brainmap file. Shared by the extension host and the webview.
 
 import { FilterNode, FilterProperty, FilterValues, makeGroup, matches, prune, readFilter } from './filter';
+import { keyLabel, sectionArg } from './sections';
 
 export interface Position {
   x: number;
@@ -383,7 +384,7 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
   return [...kinds.keys()].sort((a, b) => a.localeCompare(b)).map((k) => {
     const set = kinds.get(k)!;
     const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : set.has('list') ? 'list' : 'text';
-    return { id: `data.${k}`, label: k, kind };
+    return { id: `data.${k}`, label: keyLabel(k), kind };
   });
 }
 
@@ -412,6 +413,8 @@ export function cardProperties(node: BrainNode, keys: string[] | undefined, link
   return (keys ?? [])
     .map((k) => {
       const v = node.data?.[k];
+      // A part of the note's text stays text, [[links]] and all.
+      if (sectionArg(k) !== undefined) return typeof v === 'string' && v.trim() ? [{ text: v.trim() }] : [];
       const targets = linked(k);
       const find = (name: string) => targets.find((n) => nodeNames(n).includes(name.toLowerCase()))?.id;
       return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).flatMap((t): CardValue[] => {
