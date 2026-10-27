@@ -69,7 +69,7 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   - A filter without its value does not filter yet. The editor counts the matches as you type;
     the *Slices* button shows how many nodes the active slice keeps (`6/10`).
 - **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
-  `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
+  `Shift+F` fit · `Z` center on the selection · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
 - **Select several** – `Shift`+drag on the background draws a frame; `Shift`+click adds or removes a node.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.

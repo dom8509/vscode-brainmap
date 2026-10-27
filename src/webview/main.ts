@@ -633,6 +633,7 @@ class App {
         const id = target.id;
         items.push(
           { label: 'Open note', hint: 'Enter', action: () => this.openNote(id) },
+          { label: 'Center view', hint: 'Z', action: () => this.graph.showElements(selNodes.includes(id) ? selNodes : [id]) },
           'separator',
           { label: 'Focus on this', action: () => {
             if (!this.graph.focus) this.toggleFocus();
@@ -671,6 +672,7 @@ class App {
         { label: `Set type for all ${nodes.length}`, hint: '▸', action: () => this.openTypePopover(at, nodes) },
         { label: 'Add tag to all', hint: '▸', action: () => this.openTagPopover(at, nodes) },
         { label: 'Save as slice', action: () => this.sliceFrom(selNodes, 'Selection', 'both', 0) },
+        { label: 'Center view', hint: 'Z', action: () => this.graph.showElements(selNodes) },
         'separator',
         { label: 'Delete all…', hint: '⌫', danger: true, action: () => this.requestDelete(this.selection) },
       );
@@ -701,6 +703,7 @@ class App {
           if (!this.graph.focus) this.toggleFocus();
           this.graph.select([id]);
         } },
+        { label: 'Center view', hint: 'Z', action: () => this.graph.showElements(selNodes.includes(id) ? selNodes : [id]) },
         { label: 'Select neighbours', action: () => this.graph.select(this.graph.cy.getElementById(id).closedNeighborhood().nodes().map((n) => n.id())) },
         { label: 'Slice from here', action: () => this.sliceFrom([id]) },
         'separator',
@@ -786,6 +789,12 @@ class App {
     this.commit({ popup: true });
   }
 
+  /** Z: the selection into view (centered, zoomed so it fits); without one, the whole graph. */
+  private centerView() {
+    if (this.selection.length) this.graph.showElements(this.selection);
+    else this.graph.fit();
+  }
+
   private onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
@@ -867,6 +876,9 @@ class App {
         break;
       case 'F':
         this.graph.fit();
+        break;
+      case 'z':
+        this.centerView();
         break;
       case 'g':
         this.toggleGroups();
@@ -1358,7 +1370,7 @@ class App {
     const item = (k: string, label: string) => h('span', {}, kbd(k), ' ', label);
     this.hints.replaceChildren(
       item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F2', 'rename'), item('#', 'tag'), item('T', 'type'),
-      item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'),
+      item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'), item('Z', 'center'),
       item('Ctrl K', 'search'), item('Esc', 'deselect'), item('⇧ drag', 'select several'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
     );

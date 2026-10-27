@@ -656,6 +656,26 @@ export class GraphView {
     this.cy.animate({ center: { eles } } as any, { duration });
   }
 
+  /**
+   * Brings elements into view: centers them and zooms out until all fit; zoomed far
+   * out, it also zooms in to where cards are readable.
+   */
+  showElements(ids: string[], duration = 350) {
+    const eles = this.cy.collection(ids.map((id) => this.cy.getElementById(id)) as any).not('.hidden');
+    if (eles.empty()) return;
+    this.cy.resize();
+    const bb = eles.boundingBox({ includeLabels: false } as any);
+    const pad = 60;
+    const w = this.cy.width();
+    const h = this.cy.height();
+    const fits = Math.min((w - 2 * pad) / Math.max(bb.w, 1), (h - 2 * pad) / Math.max(bb.h, 1));
+    const zoom = Math.max(this.cy.minZoom(), Math.min(fits, Math.max(this.cy.zoom(), 0.8), this.cy.maxZoom()));
+    const cx = (bb.x1 + bb.x2) / 2;
+    const cy = (bb.y1 + bb.y2) / 2;
+    this.cy.stop(true);
+    this.cy.animate({ zoom, pan: { x: w / 2 - cx * zoom, y: h / 2 - cy * zoom } } as any, { duration });
+  }
+
   /** Screen box (relative to the canvas) of an element. */
   renderedBox(id: string) {
     const el = this.cy.getElementById(id);
