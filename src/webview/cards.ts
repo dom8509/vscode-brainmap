@@ -71,6 +71,8 @@ export class CardLayer {
   private ready = false;
   private editing?: string;
   groups = true;
+  /** Zoomed far out, cards turn into plain blocks without text. */
+  simplify = true;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
     this.hullSvg.setAttribute('class', 'hull-svg');
@@ -100,7 +102,7 @@ export class CardLayer {
     const cy = this.cy;
     const zoom = cy.zoom();
     const pan = cy.pan();
-    const low = zoom < LOD_ZOOM;
+    const low = this.simplify && zoom < LOD_ZOOM;
     this.cardLayer.classList.toggle('lod-low', low);
     this.hullLayer.classList.toggle('lod-low', low);
 
@@ -123,6 +125,7 @@ export class CardLayer {
       cls.toggle('dim', n.hasClass('fdim'));
       cls.toggle('slice-dim', n.hasClass('dimmed'));
       cls.toggle('hit', n.hasClass('search-hit'));
+      cls.toggle('slice-hit', n.hasClass('slice-hit'));
       cls.toggle('hover', n.hasClass('hover'));
       cls.toggle('drop', n.hasClass('drop-target'));
     });
@@ -210,10 +213,10 @@ export class CardLayer {
         const p = n.position();
         const w = n.data('width') / 2;
         const card = { x1: p.x - w, y1: p.y - CARD_HEIGHT / 2, x2: p.x + w, y2: p.y + CARD_HEIGHT / 2 };
-        const type = n.data('type') as string;
+        const type = n.data('group') as string;
         all.push({ type: type ?? '', card });
         if (!type) return;
-        const g = groups.get(type) ?? { color: n.data('typeColor'), name: n.data('typeName'), n: 0, boxes: [] as Rect[], cards: [] as Rect[] };
+        const g = groups.get(type) ?? { color: n.data('groupColor'), name: n.data('groupName'), n: 0, boxes: [] as Rect[], cards: [] as Rect[] };
         g.cards.push(card);
         g.boxes.push({ x1: card.x1 - HULL_PAD, y1: card.y1 - HULL_TOP, x2: card.x2 + HULL_PAD, y2: card.y2 + HULL_PAD });
         g.n++;
@@ -261,9 +264,11 @@ export class CardLayer {
         hull.labels.push(anchor);
       }
       while (hull.labels.length > parts.length) hull.labels.pop()!.remove();
+      // Names grow and shrink with the cards; zoomed far out they keep a fixed, readable size.
+      const scale = this.simplify && zoom < LOD_ZOOM ? '' : ` scale(${zoom})`;
       parts.forEach((p, i) => {
         const anchor = hull!.labels[i];
-        anchor.style.transform = `translate(${p.anchor.x * zoom + pan.x}px, ${p.anchor.y * zoom + pan.y}px)`;
+        anchor.style.transform = `translate(${p.anchor.x * zoom + pan.x}px, ${p.anchor.y * zoom + pan.y}px)${scale}`;
         anchor.classList.toggle('outside', p.outside);
         const label = anchor.firstElementChild as HTMLElement;
         label.textContent = parts.length > 1 ? `${g.name} · ${p.size} of ${g.n}` : `${g.name} · ${g.n}`;

@@ -13,6 +13,7 @@ import {
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT } from './cards';
+import { laneLayout, laneOf } from './lanes';
 
 cytoscape.use(cola);
 cytoscape.use(fcose);
@@ -190,6 +191,11 @@ export class GraphView {
     const font = cssVar('--vscode-font-family', 'sans-serif');
     return [
       {
+        // Shift+drag on the background draws this frame to select several nodes.
+        selector: 'core',
+        style: { 'selection-box-color': accent, 'selection-box-opacity': 0.1, 'selection-box-border-color': accent, 'selection-box-border-width': 1 } as any,
+      },
+      {
         // The node is an invisible hit box; the HTML card on top draws it.
         selector: 'node',
         style: {
@@ -260,10 +266,15 @@ export class GraphView {
 
       const center = this.viewportCenter();
       const toAdd: ElementDefinition[] = [];
+      const groupBy = map.settings.style?.groupBy ?? 'type';
       for (const n of map.nodes) {
         const st = resolveNodeStyle(map, n);
         const label = n.label || n.id;
         const typeColor = (n.type && map.settings.style?.nodeTypes?.[n.type]?.color) || (n.type ? autoColor(n.type) : st.color);
+        // The group a node belongs to for areas and grouped layouts.
+        const group = laneOf(n, groupBy);
+        const groupStyle = groupBy === 'type' ? map.settings.style?.nodeTypes : groupBy === 'tag' ? map.settings.style?.tags : undefined;
+        const groupColor = group ? groupStyle?.[group]?.color ?? autoColor(group) : '';
         const data = {
           id: n.id,
           label,
@@ -271,6 +282,9 @@ export class GraphView {
           typeColor,
           type: n.type ?? '',
           typeName: n.type ? n.type.charAt(0).toUpperCase() + n.type.slice(1) : '',
+          group,
+          groupColor,
+          groupName: group ? group.charAt(0).toUpperCase() + group.slice(1) : '',
           tags: n.tags ?? [],
           // Wide enough for the name, within limits so the graph stays tidy.
           width: Math.round(Math.max(170, Math.min(260, label.length * 7.4 + 96))),
@@ -289,13 +303,14 @@ export class GraphView {
           });
         }
       }
+      const edgeLabel = map.settings.style?.edgeLabel ?? 'label';
       for (const e of map.edges) {
         const st = resolveEdgeStyle(map, e);
         const data = {
           id: e.id,
           source: e.source,
           target: e.target,
-          label: e.label ?? '',
+          label: edgeLabel === 'label' ? e.label ?? '' : edgeLabel === 'type' ? e.type ?? '' : '',
           sourceArrow: e.directed === false ? 'triangle' : 'none',
           type: e.type ?? '',
           color: st.color,
@@ -327,10 +342,11 @@ export class GraphView {
 
   applySlice(map: BrainMap) {
     const cy = this.cy;
-    cy.elements().removeClass('hidden dimmed');
+    cy.elements().removeClass('hidden dimmed slice-hit');
     const slice = map.settings.slices?.find((s) => s.name === map.settings.activeSlice);
     if (!slice) return;
     const res = computeSlice(map, slice);
+    if (slice.highlight) res.matches.forEach((id) => cy.getElementById(id).addClass('slice-hit'));
     const cls = map.settings.sliceMode === 'dim' ? 'dimmed' : 'hidden';
     cy.nodes().forEach((n) => {
       if (!res.nodes.has(n.id())) n.addClass(cls);
@@ -373,7 +389,7 @@ export class GraphView {
     const types = new Set<string>();
     const elements: ElementDefinition[] = [];
     nodes.forEach((n) => {
-      const t = n.data('type') as string | undefined;
+      const t = n.data('group') as string | undefined;
       if (t) types.add(t);
       elements.push({ group: 'nodes', data: { id: n.id(), width: n.data('width'), parent: t ? `__group_${t}` : undefined }, position: { ...n.position() } });
     });
@@ -420,7 +436,7 @@ export class GraphView {
   private addGroupEdges(nodes: NodeCollection) {
     const byType = new Map<string, string[]>();
     nodes.forEach((n) => {
-      const t = n.data('type') as string | undefined;
+      const t = n.data('group') as string | undefined;
       if (!t) return;
       if (!byType.has(t)) byType.set(t, []);
       byType.get(t)!.push(n.id());
@@ -463,7 +479,7 @@ export class GraphView {
     const grouped = this.groupLayout;
     // Nodes of a type next to each other, for layouts that place nodes in a given order.
     const byType = (a: any, b: any) =>
-      a.isNode() && b.isNode() ? String(a.data('type') ?? '\uffff').localeCompare(String(b.data('type') ?? '\uffff')) : 0;
+      a.isNode() && b.isNode() ? String(a.data('group') || '\uffff').localeCompare(String(b.data('group') || '\uffff')) : 0;
     const force = l.name === 'force' || l.name === 'fcose';
     // Force layouts start from an arrangement where each group is one area, then refine it.
     const start = grouped && force ? this.groupedPositions(visible, l, lengthOf) : undefined;
@@ -544,6 +560,24 @@ export class GraphView {
       case 'grid':
         options = { name: 'grid', ...anim, avoidOverlapPadding: l.nodeSpacing, sort: grouped ? byType : undefined };
         break;
+      case 'typeColumns':
+      case 'typeRows': {
+        const order = l.laneOrders[l.laneBy];
+        const model = new Map(map.nodes.map((n) => [n.id, n]));
+        const lanes = laneLayout(
+          visible.nodes().map((n) => ({
+            id: n.id(),
+            label: String(n.data('label') ?? n.id()),
+            lane: laneOf(model.get(n.id()) ?? { id: n.id() }, l.laneBy, order),
+            width: n.data('width'),
+            height: CARD_HEIGHT,
+          })),
+          visible.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
+          { axis: l.name === 'typeColumns' ? 'columns' : 'rows', nodeSpacing: Math.max(l.nodeSpacing, 10), laneGap: Math.max(l.edgeLength, 60), order },
+        );
+        options = { name: 'preset', ...anim, positions: (n: NodeSingular) => lanes[n.id()] ?? n.position() };
+        break;
+      }
     }
 
     const run = () => {

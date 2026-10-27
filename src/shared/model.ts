@@ -62,7 +62,9 @@ export type LayoutName =
   | 'breadthfirst'
   | 'concentric'
   | 'circle'
-  | 'grid';
+  | 'grid'
+  | 'typeColumns'
+  | 'typeRows';
 
 export interface LayoutSettings {
   name: LayoutName;
@@ -80,12 +82,24 @@ export interface LayoutSettings {
   hideOtherEdges?: boolean;
   /** Center the view on the selected element(s). */
   followSelection?: boolean;
+  /** Lane layouts: what puts nodes into lanes: 'type', 'tag' or 'data.<key>'. */
+  laneBy?: string;
+  /** Lane layouts: lane order per laneBy value. Lanes not listed come after, by name. */
+  laneOrders?: Record<string, string[]>;
 }
 
 export type ColorBy = 'type' | 'tag' | 'none';
 
+export type EdgeLabel = 'label' | 'type' | 'none';
+
 export interface StyleSettings {
   colorBy?: ColorBy;
+  /** What connections show as text. Default: their label. */
+  edgeLabel?: EdgeLabel;
+  /** What groups nodes into areas: 'type', 'tag' or 'data.<key>'. Default: 'type'. */
+  groupBy?: string;
+  /** Zoomed far out, nodes turn into plain blocks without text. Default: true. */
+  simplifyZoomedOut?: boolean;
   nodeTypes?: Record<string, NodeStyle>;
   edgeTypes?: Record<string, EdgeStyle>;
   tags?: Record<string, NodeStyle>;
@@ -110,6 +124,10 @@ export interface Slice {
   /** Max hops from roots (undefined = unlimited). */
   depth?: number;
   direction?: SliceDirection;
+  /** Also show the nodes connected to the matches (follows direction and depth). */
+  expand?: boolean;
+  /** Mark the nodes that match the node filter. */
+  highlight?: boolean;
 }
 
 export interface Settings {
@@ -132,7 +150,7 @@ export interface BrainMap {
 
 export type FileFormat = 'json' | 'yaml';
 
-const LAYOUT_NAMES: LayoutName[] = ['force', 'fcose', 'hierarchy', 'breadthfirst', 'concentric', 'circle', 'grid'];
+const LAYOUT_NAMES: LayoutName[] = ['force', 'fcose', 'hierarchy', 'breadthfirst', 'concentric', 'circle', 'grid', 'typeColumns', 'typeRows'];
 
 export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   name: 'force',
@@ -144,6 +162,8 @@ export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   animate: true,
   hideOtherEdges: false,
   followSelection: true,
+  laneBy: 'type',
+  laneOrders: {},
 };
 
 export const PALETTE = [
@@ -291,6 +311,8 @@ export function resolveEdgeStyle(map: BrainMap, edge: BrainEdge): EdgeStyle & { 
 export interface SliceResult {
   nodes: Set<string>;
   edges: Set<string>;
+  /** Shown nodes that match the node filter (empty without a node filter). */
+  matches: Set<string>;
 }
 
 /** What a node offers to a filter. Connections are counted in the whole graph; a two-way edge counts as in and out. */
@@ -349,11 +371,17 @@ export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
   const nodeOk = (n: BrainNode) => matches(slice.nodeFilter, values(n));
   const edgeOk = (e: BrainEdge) => matches(slice.edgeFilter, edgeValues(e));
 
-  let nodes = new Set(map.nodes.filter(nodeOk).map((n) => n.id));
+  const matched = new Set(map.nodes.filter(nodeOk).map((n) => n.id));
+  let nodes = matched;
   let candidateEdges = map.edges.filter((e) => edgeOk(e));
 
-  const roots = (slice.roots ?? []).filter((r) => map.nodes.some((n) => n.id === r));
-  if (roots.length) {
+  let roots = (slice.roots ?? []).filter((r) => map.nodes.some((n) => n.id === r));
+  // Expanding starts at the matches (or the start nodes that match) and may reach any node.
+  if (slice.expand) {
+    roots = roots.length ? roots.filter((r) => matched.has(r)) : [...matched];
+    nodes = new Set(map.nodes.map((n) => n.id));
+  }
+  if (roots.length || slice.expand) {
     // Breadth-first walk from the roots along the allowed edges.
     const dir = slice.direction ?? 'downstream';
     const maxDepth = slice.depth ?? Infinity;
@@ -385,7 +413,8 @@ export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
   const edges = new Set(
     candidateEdges.filter((e) => nodes.has(e.source) && nodes.has(e.target)).map((e) => e.id),
   );
-  return { nodes, edges };
+  const marked = prune(slice.nodeFilter) ? new Set([...matched].filter((id) => nodes.has(id))) : new Set<string>();
+  return { nodes, edges, matches: marked };
 }
 
 export function newId(prefix: string, existing: Iterable<string>): string {

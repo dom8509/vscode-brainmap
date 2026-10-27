@@ -23,6 +23,7 @@ import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
+import { laneAttributes, laneNames } from './lanes';
 import { ContextMenu, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
 import { Point, Popover, barButton, below, colorSwatches, tagPicker, typeList } from './panels';
 
@@ -46,6 +47,8 @@ const LAYOUTS: { value: LayoutName; label: string }[] = [
   { value: 'concentric', label: 'Concentric' },
   { value: 'circle', label: 'Circle' },
   { value: 'grid', label: 'Grid' },
+  { value: 'typeColumns', label: 'Columns' },
+  { value: 'typeRows', label: 'Rows' },
 ];
 
 /** Starter graphs offered on an empty canvas. */
@@ -232,6 +235,7 @@ class App {
     this.format = msg.format;
     this.fileName = msg.fileName;
     this.graph.follow = this.layout.followSelection;
+    this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
     this.renderToolbar();
     this.graph.sync(this.map);
@@ -263,7 +267,9 @@ class App {
   /** Applies a model change: re-syncs the graph, re-renders UI and persists. */
   private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean; popup?: boolean } = {}) {
     this.graph.follow = this.layout.followSelection;
+    this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     this.graph.sync(this.map);
+    this.cards.schedule();
     // New or removed nodes/connections re-run the layout so the graph stays arranged.
     if (this.structureChanged() || opts.relayout) this.graph.runLayout(this.map, { fit: opts.fit ?? false });
     this.renderToolbar();
@@ -317,15 +323,22 @@ class App {
     return `Node ${i}`;
   }
 
-  /** Creates a node, selects it and lets the user type its name right on the card. */
-  private addNode(pos: Position, connectFrom?: string) {
+  /**
+   * Creates a node, selects it and lets the user type its name right on the card.
+   * `like` is a node whose type and incoming connection type the new one copies (a sibling).
+   */
+  private addNode(pos: Position, connectFrom?: string, like?: string) {
     const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel() };
     this.graph.placeAt(node.id, pos);
     const parent = connectFrom ? this.node(connectFrom) : undefined;
+    const model = like ? this.node(like) : undefined;
     // A connected node inherits the type of its parent – usually what you want in a mind map.
-    if (parent?.type) node.type = parent.type;
+    // A sibling is more like its sibling than like their parent.
+    const type = model ? model.type : parent?.type;
+    if (type) node.type = type;
     this.map.nodes.push(node);
-    if (parent) this.map.edges.push(this.makeEdge(parent.id, node.id));
+    const edgeType = like ? this.map.edges.find((e) => e.source === connectFrom && e.target === like)?.type : undefined;
+    if (parent) this.map.edges.push(this.makeEdge(parent.id, node.id, true, like ? edgeType ?? '' : this.edgeType));
     this.commit();
     this.graph.select([node.id]);
     this.editInline(node.id, true);
@@ -344,7 +357,7 @@ class App {
   }
 
   /** Adds a node next to `parentId`, in the direction with the most free space. */
-  addChild(parentId: string) {
+  addChild(parentId: string, like?: string) {
     const p = this.graph.cy.getElementById(parentId).position();
     const dist = this.layout.edgeLength + 80;
     const others = this.graph.cy.nodes().not('.hidden').map((n) => (n as any).position() as Position);
@@ -360,15 +373,15 @@ class App {
         best = c;
       }
     }
-    this.addNode(best, parentId);
+    this.addNode(best, parentId, like);
   }
 
   /** A new node next to `id` that hangs off the same parent. */
   addSibling(id: string) {
     const parent = this.map.edges.find((e) => e.target === id)?.source;
-    if (parent) return this.addChild(parent);
+    if (parent) return this.addChild(parent, id);
     const p = this.graph.cy.getElementById(id).position();
-    this.addNode({ x: p.x + 240, y: p.y });
+    this.addNode({ x: p.x + 240, y: p.y }, undefined, id);
   }
 
   /** Name editing on the card. Accepts "#tag" and ":type" words as shortcuts. */
@@ -399,8 +412,14 @@ class App {
 
   /** Lets the user type the name of another node (with suggestions) and connects to it. */
   private async connectWithPicker(id: string, at: Position) {
+    // Only offer nodes that are not connected to this one yet (in any direction).
+    const linked = new Set([id]);
+    for (const e of this.map.edges) {
+      if (e.source === id) linked.add(e.target);
+      if (e.target === id) linked.add(e.source);
+    }
     const options = this.map.nodes
-      .filter((n) => n.id !== id)
+      .filter((n) => !linked.has(n.id))
       .map((n) => ({ id: n.id, label: nameOf(n), detail: [n.type, n.label && n.label !== n.id ? n.id : ''].filter(Boolean).join(' · ') }));
     const picked = await pickNode(at, nameOf(this.node(id)), options);
     if (!picked) return;
@@ -1121,7 +1140,9 @@ class App {
   private renderHints() {
     const item = (k: string, label: string) => h('span', {}, kbd(k), ' ', label);
     this.hints.replaceChildren(
-      item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F', 'focus'), item('⌫', 'delete'),
+      item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F2', 'rename'), item('#', 'tag'), item('T', 'type'),
+      item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'),
+      item('Ctrl K', 'search'), item('Esc', 'deselect'), item('⇧ drag', 'select several'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
     );
   }
@@ -1219,6 +1240,7 @@ class App {
   private renderToolbar() {
     const types = uniqueTypes(this.map);
     const l = this.layout;
+    const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
     const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
     const searchInput = h('input', {
       type: 'search',
@@ -1283,6 +1305,13 @@ class App {
               (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
               { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
             ),
+          lanes &&
+            select(
+              laneAttributes(this.map.nodes).map((a) => ({ value: a.value, label: `by ${a.label}` })),
+              l.laneBy,
+              (v) => this.setLayout({ laneBy: v }),
+              { class: 'chip-select', title: 'Attribute that puts nodes into columns or rows' },
+            ),
           menuBtn('layout', 'Layout'),
         ),
         h('div', { class: 'group', role: 'group', 'aria-label': 'Show' },
@@ -1344,6 +1373,21 @@ class App {
         style.colorBy ?? 'type',
         (v) => { style.colorBy = v as any; this.commit({ panel: false }); },
       )),
+      field('Connections show', select(
+        [{ value: 'label', label: 'Label' }, { value: 'type', label: 'Type' }, { value: 'none', label: 'Nothing' }],
+        style.edgeLabel ?? 'label',
+        (v) => { style.edgeLabel = v as any; this.commit({ panel: false }); },
+      )),
+      field('Group nodes by', select(
+        laneAttributes(this.map.nodes),
+        style.groupBy ?? 'type',
+        (v) => { style.groupBy = v === 'type' ? undefined : v; this.commit({ relayout: this.cards.groups, panel: false }); },
+        { title: 'What the areas shown with Groups (G) are made of' },
+      )),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: style.simplifyZoomedOut ?? true,
+          onchange: (e: Event) => { style.simplifyZoomedOut = (e.target as HTMLInputElement).checked; this.commit({ panel: false }); } }),
+        'Hide text on nodes when zoomed far out'),
       h('h4', {}, 'Node types'), nodeRows.length ? nodeRows : h('p', { class: 'muted' }, 'No node types yet. Set a type in the inspector.'),
       h('h4', {}, 'Tags'), tagRows.length ? tagRows : h('p', { class: 'muted' }, 'No tags yet.'),
       h('h4', {}, 'Dependency (edge) types'),
@@ -1367,16 +1411,18 @@ class App {
         out));
     };
     const hierarchical = l.name === 'hierarchy' || l.name === 'breadthfirst';
+    const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
     return h('div', {},
       field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
-      slider(l.name === 'hierarchy' ? 'Level distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
+      slider(l.name === 'hierarchy' ? 'Level distance' : l.name === 'typeColumns' || l.name === 'typeRows' ? 'Lane distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.live, onchange: (e: Event) => this.setLayout({ live: (e.target as HTMLInputElement).checked }) }),
         'Live physics with cola (neighbours follow while dragging)'),
       l.name !== 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.animate, onchange: (e: Event) => this.setLayout({ animate: (e.target as HTMLInputElement).checked }) }),
         'Animate transitions'),
+      lanes && this.lanePanel(),
       hierarchical && [
         l.name === 'hierarchy' && field('Direction', select(
           [{ value: 'TB', label: 'Top → bottom' }, { value: 'BT', label: 'Bottom → top' }, { value: 'LR', label: 'Left → right' }, { value: 'RL', label: 'Right → left' }],
@@ -1396,6 +1442,37 @@ class App {
         h('button', { onclick: () => this.graph.fit() }, svgIcon(ICON.fit, 14), 'Fit view ', kbd('⇧F')),
       ),
     );
+  }
+
+  /** Lane layouts: which attribute makes the lanes, and the order of the lanes. */
+  private lanePanel() {
+    const l = this.layout;
+    const names = laneNames(this.map.nodes, l.laneBy, l.laneOrders[l.laneBy]);
+    const move = (i: number, by: number) => {
+      const order = names.filter(Boolean);
+      const [name] = order.splice(i, 1);
+      order.splice(i + by, 0, name);
+      this.setLayout({ laneOrders: { ...l.laneOrders, [l.laneBy]: order } });
+    };
+    const last = names.filter(Boolean).length - 1;
+    return [
+      field(l.name === 'typeColumns' ? 'Columns by' : 'Rows by',
+        select(laneAttributes(this.map.nodes), l.laneBy, (v) => this.setLayout({ laneBy: v }))),
+      h('h4', {}, l.name === 'typeColumns' ? 'Column order (left → right)' : 'Row order (top → bottom)'),
+      h('div', { class: 'lane-order' },
+        names.map((name, i) =>
+          h('div', { class: 'lane-row' },
+            h('span', { class: name ? 'name' : 'name muted' }, name || '(none)'),
+            name && h('button', { class: 'icon-btn', title: 'Move up', disabled: i === 0, onclick: () => move(i, -1) }, '↑'),
+            name && h('button', { class: 'icon-btn', title: 'Move down', disabled: i === last, onclick: () => move(i, 1) }, '↓'),
+          ),
+        ),
+      ),
+      !!l.laneOrders[l.laneBy]?.length && h('button', { onclick: () => {
+        const { [l.laneBy]: _drop, ...rest } = l.laneOrders;
+        this.setLayout({ laneOrders: rest });
+      } }, 'Sort by name'),
+    ];
   }
 
   private sliceFrom(roots: string[], name?: string, direction: Slice['direction'] = 'downstream', depth?: number) {
@@ -1486,7 +1563,13 @@ class App {
         s.direction ?? 'downstream', (v) => { s.direction = v as any; updateCount(); })),
       field('Max depth (empty = unlimited)', h('input', { type: 'number', min: 0, value: s.depth ?? '',
         onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); updateCount(); } })),
-      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown.'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: !!s.expand, onchange: (e: Event) => { s.expand = (e.target as HTMLInputElement).checked || undefined; updateCount(); } }),
+        'Also show nodes connected to the matching nodes'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: !!s.highlight, onchange: (e: Event) => { s.highlight = (e.target as HTMLInputElement).checked || undefined; } }),
+        'Highlight the matching nodes'),
+      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown. "Also show connected nodes" starts at the matching nodes and follows the kept connections, in the direction and up to the depth above.'),
       count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
@@ -1503,6 +1586,7 @@ function describeSlice(s: Slice): string {
   if (nodes) parts.push(nodes);
   if (edges) parts.push(`connections: ${edges}`);
   if (s.roots?.length) parts.push(`from ${s.roots.join(', ')} ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
+  if (s.expand) parts.push(`+ connected ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
   return parts.join(' · ') || 'everything';
 }
 

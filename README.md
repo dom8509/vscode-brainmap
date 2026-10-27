@@ -69,6 +69,7 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
     the *Slices* button shows how many nodes the active slice keeps (`6/10`).
 - **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
   `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
+- **Select several** – `Shift`+drag on the background draws a frame; `Shift`+click adds or removes a node.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.
 
@@ -81,15 +82,21 @@ The format is kept when saving. New files use the `brainmap.defaultFormat` setti
 title: Example
 settings:
   layout:
-    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid
+    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid | typeColumns | typeRows
     hierarchyEdgeTypes: [depends-on]
     direction: TB              # TB | BT | LR | RL
     nodeSpacing: 40
     edgeLength: 120
     live: true                 # force layout (cola) keeps running
     followSelection: true      # center the view on the selected node
+    laneBy: type               # typeColumns/typeRows: type | tag | data.<key>
+    laneOrders:                # lane order per laneBy; unlisted lanes follow by name
+      type: [frontend, service, db]
   style:
     colorBy: type              # type | tag | none
+    edgeLabel: label           # what connections show: label | type | none
+    simplifyZoomedOut: true    # zoomed far out, nodes become blocks without text
+    groupBy: type              # what Groups (G) are made of: type | tag | data.<key>
     nodeTypes:
       service: { color: '#59a14f', shape: round-rectangle, size: 40 }
     tags:
@@ -109,6 +116,11 @@ settings:
       edgeFilter: { property: type, op: is, value: depends-on }
       direction: downstream    # downstream | upstream | both
       depth: 2
+    - name: Critical and what it uses
+      nodeFilter: { property: tags, op: has, value: critical }
+      expand: true             # also show nodes connected to the matches (direction, depth)
+      highlight: true          # mark the nodes that match the filter
+      direction: downstream
     # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend
   sliceMode: hide              # hide | dim
@@ -142,3 +154,15 @@ npm run package    # build a .vsix
 Press `F5` in VS Code to start an Extension Development Host with the `examples` folder.
 
 Install the built package with `code --install-extension vscode-brainmap-0.1.0.vsix`.
+
+### Releases
+
+Push a version tag for a commit on `main` and GitHub Actions builds the `.vsix` and attaches it to a new release:
+
+```sh
+git checkout main && git pull
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The tag sets the version (`v0.2.0` → `0.2.0`). Tags on other branches are rejected.
