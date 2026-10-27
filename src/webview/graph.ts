@@ -1,4 +1,4 @@
-import cytoscape, { Core, ElementDefinition, Layouts, NodeSingular } from 'cytoscape';
+import cytoscape, { Core, ElementDefinition, Layouts, NodeCollection, NodeSingular } from 'cytoscape';
 import cola from 'cytoscape-cola';
 import fcose from 'cytoscape-fcose';
 import dagre from 'cytoscape-dagre';
@@ -38,6 +38,11 @@ export interface GraphCallbacks {
 const cssVar = (name: string, fallback: string) =>
   getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
 
+/** Groups up to this size get a helper edge between every pair of nodes. */
+const GROUP_CLIQUE = 10;
+/** Helper edges are this much longer than real ones. */
+const GHOST_LENGTH = 1.4;
+
 export class GraphView {
   readonly cy: Core;
   private layout?: Layouts;
@@ -46,6 +51,8 @@ export class GraphView {
   private selTimer?: number;
   /** Center the view on the selection (layout setting `followSelection`). */
   follow = true;
+  /** Layouts keep nodes of one type together where the connections allow it (Groups on). */
+  groupLayout = true;
   /** Dim everything that is not next to the selection. */
   focus = true;
   private dashOffset = 0;
@@ -236,6 +243,8 @@ export class GraphView {
       },
       { selector: '.dimmed', style: { opacity: 0.1, events: 'no' } as any },
       { selector: '.hidden', style: { display: 'none' } },
+      // Helper edges that pull a group together during a layout; never seen, never hit.
+      { selector: 'edge.ghost', style: { visibility: 'hidden', events: 'no', width: 0 } as any },
     ];
   }
 
@@ -246,7 +255,7 @@ export class GraphView {
     cy.batch(() => {
       const nodeIds = new Set(map.nodes.map((n) => n.id));
       const edgeIds = new Set(map.edges.map((e) => e.id));
-      cy.edges().filter((e) => !edgeIds.has(e.id())).remove();
+      cy.edges().not('.ghost').filter((e) => !edgeIds.has(e.id())).remove();
       cy.nodes().filter((n) => !nodeIds.has(n.id())).remove();
 
       const center = this.viewportCenter();
@@ -352,6 +361,88 @@ export class GraphView {
   stopLayout() {
     this.layout?.stop();
     this.layout = undefined;
+    this.cy.edges('.ghost').remove();
+  }
+
+  /**
+   * Where the nodes go when every group is one area: fCoSE lays the graph out with a
+   * box around each type, in a separate graph that is never shown.
+   */
+  private groupedPositions(visible: cytoscape.CollectionReturnValue, l: Required<LayoutSettings>, lengthOf: (e: any) => number) {
+    const nodes = visible.nodes();
+    const types = new Set<string>();
+    const elements: ElementDefinition[] = [];
+    nodes.forEach((n) => {
+      const t = n.data('type') as string | undefined;
+      if (t) types.add(t);
+      elements.push({ group: 'nodes', data: { id: n.id(), width: n.data('width'), parent: t ? `__group_${t}` : undefined }, position: { ...n.position() } });
+    });
+    types.forEach((t) => elements.push({ group: 'nodes', data: { id: `__group_${t}` } }));
+    visible.edges().forEach((e) => {
+      elements.push({ group: 'edges', data: { id: e.id(), source: e.source().id(), target: e.target().id(), length: lengthOf(e) } });
+    });
+    const shadow = cytoscape({
+      headless: true,
+      styleEnabled: true,
+      elements,
+      style: [
+        { selector: 'node', style: { width: 'data(width)', height: CARD_HEIGHT, shape: 'rectangle' } as any },
+        { selector: ':parent', style: { padding: 24 } as any },
+      ],
+    });
+    shadow
+      .layout({
+        name: 'fcose',
+        animate: false,
+        quality: 'proof',
+        randomize: true,
+        nodeSeparation: l.nodeSpacing,
+        idealEdgeLength: (e: any) => e.data('length'),
+        nodeRepulsion: () => 4500 + l.nodeSpacing * 100,
+        edgeElasticity: () => 0.45,
+        nestingFactor: 0.1,
+        gravityCompound: 1.5,
+      } as any)
+      .run();
+    const out: Record<string, Position> = {};
+    shadow.nodes().not(':parent').forEach((n) => {
+      out[n.id()] = { ...n.position() };
+    });
+    shadow.destroy();
+    return out;
+  }
+
+  /**
+   * Invisible edges between nodes of the same type, so force layouts pull a group
+   * together. Every pair in small groups; in big ones each node to a few others,
+   * which is enough to keep them close without a flood of edges.
+   */
+  private addGroupEdges(nodes: NodeCollection) {
+    const byType = new Map<string, string[]>();
+    nodes.forEach((n) => {
+      const t = n.data('type') as string | undefined;
+      if (!t) return;
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t)!.push(n.id());
+    });
+    const add: ElementDefinition[] = [];
+    const seen = new Set<string>();
+    for (const ids of byType.values()) {
+      const k = ids.length;
+      const pair = (i: number, j: number) => {
+        const key = i < j ? `${i}:${j}` : `${j}:${i}`;
+        if (i === j || seen.has(key)) return;
+        seen.add(key);
+        add.push({ group: 'edges', classes: 'ghost', data: { id: `__ghost_${add.length}_${ids[i]}`, source: ids[i], target: ids[j] } });
+      };
+      seen.clear();
+      if (k <= GROUP_CLIQUE) {
+        for (let i = 0; i < k; i++) for (let j = i + 1; j < k; j++) pair(i, j);
+      } else {
+        for (let i = 0; i < k; i++) for (const step of [1, 2, Math.floor(k / 2)]) pair(i, (i + step) % k);
+      }
+    }
+    return this.cy.add(add);
   }
 
   /**
@@ -369,6 +460,18 @@ export class GraphView {
 
     let eles = visible;
     let options: any;
+    const grouped = this.groupLayout;
+    // Nodes of a type next to each other, for layouts that place nodes in a given order.
+    const byType = (a: any, b: any) =>
+      a.isNode() && b.isNode() ? String(a.data('type') ?? '\uffff').localeCompare(String(b.data('type') ?? '\uffff')) : 0;
+    const force = l.name === 'force' || l.name === 'fcose';
+    // Force layouts start from an arrangement where each group is one area, then refine it.
+    const start = grouped && force ? this.groupedPositions(visible, l, lengthOf) : undefined;
+    // While live physics runs, helper edges keep the groups together.
+    const ghosts = start && l.name === 'force' ? this.addGroupEdges(visible.nodes()) : undefined;
+    if (ghosts) eles = visible.union(ghosts);
+    // Helper edges are a bit longer than real ones: connections win.
+    const length = (edge: any) => (edge.hasClass('ghost') ? l.edgeLength * GHOST_LENGTH : lengthOf(edge));
     switch (l.name) {
       case 'force':
       default:
@@ -384,18 +487,18 @@ export class GraphView {
           avoidOverlap: true,
           handleDisconnected: true,
           nodeSpacing: () => l.nodeSpacing / 2,
-          edgeLength: lengthOf,
+          edgeLength: length,
           maxSimulationTime: 4000,
         };
         break;
       case 'fcose':
-        options = {
+        options = start ? { name: 'preset', ...anim, positions: (n: NodeSingular) => start[n.id()] ?? n.position() } : {
           name: 'fcose',
           ...anim,
           quality: 'proof',
           randomize: false,
           nodeSeparation: l.nodeSpacing,
-          idealEdgeLength: lengthOf,
+          idealEdgeLength: length,
           nodeRepulsion: () => 4500 + l.nodeSpacing * 100,
           edgeElasticity: () => 0.45,
         };
@@ -413,6 +516,7 @@ export class GraphView {
           nodeSep: l.nodeSpacing,
           rankSep: Math.max(l.edgeLength, 60),
           edgeSep: 10,
+          sort: grouped ? byType : undefined,
         };
         break;
       }
@@ -431,28 +535,51 @@ export class GraphView {
           minNodeSpacing: l.nodeSpacing,
           concentric: (n: NodeSingular) => n.degree(false),
           levelWidth: () => 2,
+          sort: grouped ? byType : undefined,
         };
         break;
       case 'circle':
-        options = { name: 'circle', ...anim, spacingFactor: 0.6 + l.nodeSpacing / 50 };
+        options = { name: 'circle', ...anim, spacingFactor: 0.6 + l.nodeSpacing / 50, sort: grouped ? byType : undefined };
         break;
       case 'grid':
-        options = { name: 'grid', ...anim, avoidOverlapPadding: l.nodeSpacing };
+        options = { name: 'grid', ...anim, avoidOverlapPadding: l.nodeSpacing, sort: grouped ? byType : undefined };
         break;
     }
 
-    const layout = eles.layout(options);
-    this.layout = layout;
-    // With a selection and followSelection, the selection decides the view instead of fitting everything.
-    // Read the selection when the layout settles: it may change while the layout runs.
-    const settle = () => {
-      const selected = this.follow ? this.cy.$(':selected').map((e) => e.id()) : [];
-      if (selected.length) this.centerOn(selected);
-      else if ((fit && l.name === 'force' && l.live) || !this.allInView()) this.fit();
+    const run = () => {
+      const layout = eles.layout(options);
+      this.layout = layout;
+      // With a selection and followSelection, the selection decides the view instead of fitting everything.
+      // Read the selection when the layout settles: it may change while the layout runs.
+      const settle = () => {
+        const selected = this.follow ? this.cy.$(':selected').map((e) => e.id()) : [];
+        if (selected.length) this.centerOn(selected);
+        else if ((fit && l.name === 'force' && l.live) || !this.allInView()) this.fit();
+      };
+      if (l.name === 'force' && l.live) {
+        window.setTimeout(() => this.layout === layout && settle(), 1200);
+        // Physics may still spread the graph out after that: fit once more if it grew out of view.
+        window.setTimeout(() => this.layout === layout && !this.allInView() && settle(), 3000);
+      } else
+        layout.one('layoutstop', () => {
+          ghosts?.remove();
+          settle();
+        });
+      layout.run();
     };
-    if (l.name === 'force' && l.live) window.setTimeout(() => this.layout === layout && settle(), 1200);
-    else layout.one('layoutstop', settle);
-    layout.run();
+    if (!start || l.name !== 'force') return run();
+    // Physics starts from the grouped arrangement: glide there first.
+    const glide = visible.nodes().layout({
+      name: 'preset',
+      positions: (n: NodeSingular) => start[n.id()] ?? n.position(),
+      animate: l.animate,
+      animationDuration: 500,
+      animationEasing: 'ease-in-out-cubic',
+      fit: false,
+    } as any);
+    this.layout = glide;
+    glide.one('layoutstop', () => this.layout === glide && run());
+    glide.run();
   }
 
   /** The next sync adds node `id` at `pos` instead of a random spot. */

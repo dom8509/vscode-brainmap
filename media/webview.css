@@ -31,6 +31,7 @@ body {
 #app {
   display: flex;
   flex-direction: column;
+  container: app / inline-size;
 }
 .hidden {
   display: none !important;
@@ -153,10 +154,11 @@ button:disabled {
 
 /* ---------------------------------------------------------------- toolbar */
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand main end";
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px 16px;
   min-height: 56px;
   box-sizing: border-box;
   padding: 8px 14px;
@@ -164,6 +166,7 @@ button:disabled {
   background: var(--bm-bar);
 }
 .brand {
+  grid-area: brand;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -171,7 +174,8 @@ button:disabled {
   min-width: 0;
 }
 .brand .muted {
-  max-width: 200px;
+  max-width: 180px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -182,6 +186,39 @@ button:disabled {
 .toolbar .group {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+.tb-main {
+  grid-area: main;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  min-width: 0;
+}
+.tb-main .group {
+  flex-wrap: wrap;
+}
+.search svg {
+  flex: none;
+}
+.tb-end {
+  grid-area: end;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tb-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--bm-border);
+}
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
 }
 .segmented-bar {
@@ -224,9 +261,8 @@ button:disabled {
   font-size: 12px;
 }
 .search {
-  flex: 0 1 190px;
-  min-width: 120px;
-  margin-left: auto;
+  width: 190px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -295,13 +331,21 @@ button:disabled {
 }
 
 /* group hulls */
+.hull-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
 .hull {
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.hull-anchor {
   position: absolute;
   left: 0;
   top: 0;
-  box-sizing: border-box;
-  border: 1px dashed;
-  transition: opacity 0.3s ease;
 }
 .hull-label {
   position: absolute;
@@ -312,6 +356,9 @@ button:disabled {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+.hull-anchor.outside .hull-label {
+  top: -16px;
 }
 .hull-layer.lod-low .hull-label {
   top: -30px;
@@ -513,8 +560,38 @@ button:disabled {
 }
 .legend {
   left: 14px;
+  bottom: 54px;
   max-width: 40%;
   padding: 10px 12px;
+}
+.bar-toggles {
+  position: absolute;
+  z-index: 3;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 6px;
+}
+.bar-toggle {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--bm-border);
+  background: color-mix(in srgb, var(--bm-surface) 92%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--bm-muted);
+  font-weight: 700;
+  font-size: 13px;
+  font-family: Georgia, serif;
+}
+.bar-toggle:hover {
+  color: var(--bm-fg);
+}
+.bar-toggle.on {
+  color: var(--bm-accent);
+  border-color: color-mix(in srgb, var(--bm-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--bm-accent) 12%, var(--bm-surface));
 }
 .legend-inner {
   display: flex;
@@ -1119,6 +1196,35 @@ button:disabled {
   flex-direction: column;
   gap: 4px;
 }
+.slice-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.slice-head a {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pop-settings .slice-head button.slice-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bm-muted);
+}
+.pop-settings .slice-head button.slice-icon:hover {
+  background: var(--bm-raised);
+  color: var(--bm-fg);
+}
+.pop-settings .slice-head button.slice-icon.danger:hover {
+  color: var(--bm-danger);
+}
 .slice.active {
   border-color: color-mix(in srgb, var(--bm-accent) 50%, transparent);
   background: color-mix(in srgb, var(--bm-accent) 10%, transparent);
@@ -1126,6 +1232,72 @@ button:disabled {
 .slice-editor {
   border-top: 1px solid var(--bm-border);
   padding-top: 10px;
+}
+.pop-settings:has(.filter-editor) {
+  width: 440px;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.filter-group.nested {
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--bm-border);
+  background: color-mix(in srgb, var(--bm-fg) 3%, transparent);
+}
+.filter-head, .filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-conj {
+  flex: 1;
+}
+.filter-prop {
+  width: 110px;
+  flex: none;
+}
+.filter-op {
+  width: 110px;
+  flex: none;
+}
+.filter-value {
+  flex: 1;
+  min-width: 0;
+}
+.filter-value input {
+  width: 100%;
+}
+.pop-settings button.filter-x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--bm-muted);
+  font-size: 16px;
+}
+.pop-settings button.filter-x:hover {
+  color: var(--bm-danger);
+}
+.filter-add {
+  display: flex;
+  gap: 12px;
+}
+.pop-settings .filter-add button.link {
+  height: auto;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--bm-accent);
+  font-weight: 600;
+}
+.filter-count {
+  font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1397,5 +1569,62 @@ button:disabled {
   .minibar, .popover, .hovercard, .panel {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------- narrow toolbar */
+/* Narrower: the toggles lose their labels, then the middle moves to a second row. */
+@container app (max-width: 1480px) {
+  .tb-label {
+    display: none;
+  }
+  .search {
+    width: 160px;
+  }
+  .brand .muted {
+    max-width: 140px;
+  }
+  .toolbar .toggle {
+    width: 32px;
+    padding: 0;
+  }
+}
+@container app (max-width: 1340px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "brand end" "main main";
+  }
+  /* In its own row the buttons flow as one line, so a wrapped button shares a line with the next ones. */
+  .tb-main {
+    gap: 8px;
+  }
+  .tb-main > .group {
+    display: contents;
+  }
+  .tb-main [data-menu="layout"] {
+    margin-right: 12px;
+  }
+}
+@container app (max-width: 560px) {
+  .brand b {
+    display: none;
+  }
+  .search kbd {
+    display: none;
+  }
+  .search {
+    width: 130px;
+  }
+}
+/* Very narrow: the search is an icon until it is used. */
+@container app (max-width: 440px) {
+  .search {
+    width: 32px;
+    padding: 0 9px;
+    cursor: text;
+    transition: width 0.15s ease;
+  }
+  .search:focus-within {
+    width: 150px;
   }
 }

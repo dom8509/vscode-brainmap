@@ -93,6 +93,16 @@
           ],
           "default": "yaml",
           "description": "Storage format used for new .brainmap files. Existing files keep their format."
+        },
+        "brainmap.showLegend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the bar with the legend and the stats (nodes, connections, format) at the bottom left of the graph. The i button at the bottom left toggles it."
+        },
+        "brainmap.showShortcuts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the bar with the keyboard shortcuts at the bottom of the graph. The ? button at the bottom left toggles it."
         }
       }
     }

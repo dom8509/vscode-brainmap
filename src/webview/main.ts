@@ -12,10 +12,14 @@ import {
   emptyMap,
   newId,
   resolveEdgeStyle,
+  computeSlice,
   resolveNodeStyle,
+  tidySlice,
   uniqueTypes,
 } from '../shared/model';
-import { HostMessage, WebviewMessage } from '../shared/messages';
+import { describeFilter } from '../shared/filter';
+import { filterEditor } from './filterEditor';
+import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
@@ -83,6 +87,7 @@ const ICON = {
   relayout: '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
   settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   tag: '<path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16"/>',
   connect: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8 16c4 0 4-8 8-8"/>',
@@ -93,6 +98,8 @@ const ICON = {
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   type: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
   slice: '<path d="M4 6h16M7 12h10M10 18h4"/>',
+  groups: '<rect x="3" y="3" width="11" height="11" rx="3"/><rect x="10" y="10" width="11" height="11" rx="3"/>',
+  focus: '<circle cx="12" cy="12" r="3"/><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>',
 };
 
 /** How long the mouse rests on a node before its hover card shows. */
@@ -145,6 +152,10 @@ class App {
   private stage = h('div', { class: 'stage' });
   private error = h('div', { class: 'error hidden' });
   private empty = h('div', { class: 'empty hidden' });
+  /** The bars at the bottom; the host sends the setting. */
+  bars: BarSettings = { legend: false, hints: false };
+  /** The ? and i buttons at the bottom left that show the bars. */
+  private barToggles = h('div', { class: 'bar-toggles' });
   private legend = h('div', { class: 'legend floating-bar' });
   private hints = h('div', { class: 'hints floating-bar' });
   private dropChips = h('div', { class: 'drop-chips hidden' });
@@ -157,7 +168,7 @@ class App {
 
   constructor(root: HTMLElement) {
     const canvas = h('div', { class: 'canvas' });
-    this.stage.append(canvas, this.empty, this.legend, this.hints, this.dropChips, this.minibar, this.hovercard, this.error);
+    this.stage.append(canvas, this.empty, this.barToggles, this.legend, this.hints, this.dropChips, this.minibar, this.hovercard, this.error);
     root.append(this.toolbar, h('div', { class: 'main' }, this.stage, this.panel));
     this.menu = new ContextMenu(document.body);
     this.graph = new GraphView(canvas, {
@@ -187,6 +198,7 @@ class App {
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
+    this.graph.groupLayout = this.cards.groups;
     this.renderEmpty();
     this.renderHints();
 
@@ -203,6 +215,12 @@ class App {
   // ---------------------------------------------------------------- messaging
 
   private onMessage(msg: HostMessage) {
+    if (msg.type === 'ui') {
+      this.bars = msg.bars;
+      this.renderOverlays();
+      this.renderSettings();
+      return;
+    }
     if (msg.type === 'error') {
       this.error.textContent = msg.message + ' — fix the file in the text editor.';
       this.error.classList.remove('hidden');
@@ -441,6 +459,13 @@ class App {
     this.graph.select([id]);
   }
 
+  /** ` · 12/40`: how many nodes the active slice shows. */
+  private sliceCount(): string {
+    const slice = this.map.settings.slices?.find((s) => s.name === this.map.settings.activeSlice);
+    if (!slice) return '';
+    return ` · ${computeSlice(this.map, slice).nodes.size}/${this.map.nodes.length}`;
+  }
+
   private showSlice(name: string | undefined) {
     this.map.settings.activeSlice = name || undefined;
     this.commit({ relayout: true, fit: true });
@@ -455,8 +480,10 @@ class App {
 
   private toggleGroups() {
     this.cards.groups = !this.cards.groups;
+    this.graph.groupLayout = this.cards.groups;
     this.saveUi({ groups: this.cards.groups });
     this.cards.schedule();
+    this.graph.runLayout(this.map, { fit: false });
     this.renderToolbar();
   }
 
@@ -1099,12 +1126,35 @@ class App {
     );
   }
 
+  private renderBarToggles() {
+    const btn = (bar: keyof BarSettings, label: string, title: string) =>
+      h('button', {
+        class: this.bars[bar] ? 'bar-toggle on' : 'bar-toggle',
+        title,
+        'aria-label': title,
+        'aria-pressed': String(this.bars[bar]),
+        onclick: () => this.showBar(bar, !this.bars[bar]),
+      }, label);
+    this.barToggles.replaceChildren(
+      btn('hints', '?', 'Keyboard shortcuts'),
+      btn('legend', 'i', 'Legend and stats'),
+    );
+  }
+
+  private showBar(bar: keyof BarSettings, show: boolean) {
+    this.bars = { ...this.bars, [bar]: show };
+    this.renderOverlays();
+    post({ type: 'setBar', bar, show });
+  }
+
   /** Empty state, legend and hint bar. */
   private renderOverlays() {
     const empty = this.map.nodes.length === 0;
     this.empty.classList.toggle('hidden', !empty);
-    this.legend.classList.toggle('hidden', empty);
-    this.hints.classList.toggle('hidden', empty);
+    this.renderBarToggles();
+    this.barToggles.classList.toggle('hidden', empty);
+    this.legend.classList.toggle('hidden', empty || !this.bars.legend);
+    this.hints.classList.toggle('hidden', empty || !this.bars.hints);
     if (empty) return;
     const types = uniqueTypes(this.map);
     const usedNodeTypes = types.nodeTypes.filter((t) => this.map.nodes.some((n) => n.type === t));
@@ -1172,7 +1222,7 @@ class App {
     const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
     const searchInput = h('input', {
       type: 'search',
-      placeholder: 'Search nodes…',
+      placeholder: 'Search…',
       'aria-label': 'Search nodes',
       onkeydown: (e: KeyboardEvent) => {
         if (e.key !== 'Enter') return;
@@ -1188,8 +1238,10 @@ class App {
       h('button', { class: l.name === name ? 'seg active' : 'seg', onclick: () => l.name !== name && this.setLayout({ name }) }, label);
     const others = LAYOUTS.filter((x) => x.value !== 'force' && x.value !== 'hierarchy');
     const isOther = others.some((x) => x.value === l.name);
-    const toggle = (on: boolean, label: string, title: string, onclick: () => void) =>
-      h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-pressed': String(on), onclick }, label);
+    // The label hides when the bar gets narrow; the icon stays.
+    const toggle = (on: boolean, icon: string, label: string, title: string, onclick: () => void) =>
+      h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-label': label, 'aria-pressed': String(on), onclick },
+        svgIcon(icon, 14), h('span', { class: 'tb-label' }, label));
     const iconBtn = (icon: string, title: string, onclick: () => void) =>
       h('button', { class: 'icon-btn', title, 'aria-label': title, onclick }, svgIcon(icon));
     const menuBtn = (kind: Tab, label: string) =>
@@ -1200,47 +1252,53 @@ class App {
       }, label, svgIcon(ICON.chevron, 11));
     const slice = this.map.settings.activeSlice;
 
+    // Brand on the left; how the graph is arranged and what it shows in the middle; search and
+    // view toggles on the right, with Details always last. Narrow, the middle moves to a second row.
     this.toolbar.replaceChildren(
       h('div', { class: 'brand' },
         h('span', { class: 'logo' }, svgIcon(ICON.logo, 20)),
         h('b', {}, 'BrainMap'),
-        this.fileName && h('span', { class: 'muted' }, `/ ${this.fileName}`),
+        this.fileName && h('span', { class: 'muted file-name', title: this.fileName }, `/ ${this.fileName}`),
       ),
-      h('div', { class: 'group' },
-        h('div', { class: 'segmented-bar' },
-          seg('force', 'Physics'),
-          seg('hierarchy', 'Hierarchy'),
-          select(
-            [{ value: '', label: isOther ? '' : 'More…' }, ...others],
-            isOther ? l.name : '',
-            (v) => v && this.setLayout({ name: v as LayoutName }),
-            { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' },
+      h('div', { class: 'tb-main' },
+        h('div', { class: 'group', role: 'group', 'aria-label': 'Arrange' },
+          h('div', { class: 'segmented-bar' },
+            seg('force', 'Physics'),
+            seg('hierarchy', 'Hierarchy'),
+            select(
+              [{ value: '', label: isOther ? '' : 'More…' }, ...others],
+              isOther ? l.name : '',
+              (v) => v && this.setLayout({ name: v as LayoutName }),
+              { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' },
+            ),
           ),
+          (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
+            select(
+              [
+                { value: '', label: 'by all types' },
+                ...types.edgeTypes.map((t) => ({ value: t, label: `by ${t}` })),
+                ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
+              ],
+              hierarchyValue,
+              (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
+              { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
+            ),
+          menuBtn('layout', 'Layout'),
         ),
-        (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
-          select(
-            [
-              { value: '', label: 'by all types' },
-              ...types.edgeTypes.map((t) => ({ value: t, label: `by ${t}` })),
-              ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
-            ],
-            hierarchyValue,
-            (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
-            { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
-          ),
+        h('div', { class: 'group', role: 'group', 'aria-label': 'Show' },
+          menuBtn('style', 'Style'),
+          menuBtn('slices', slice ? `Slice: ${slice}${this.sliceCount()}` : 'Slices'),
+        ),
       ),
-      h('div', { class: 'group' },
-        menuBtn('layout', 'Layout'),
-        menuBtn('style', 'Style'),
-        menuBtn('slices', slice ? `Slice: ${slice}` : 'Slices'),
-      ),
-      h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
-      h('div', { class: 'group' },
-        toggle(this.cards.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
-        toggle(this.graph.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
-        iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
-        h('button', { class: this.detailsOpen ? 'toggle on' : 'toggle', title: 'Details sidebar (D)', 'aria-pressed': String(this.detailsOpen), onclick: () => this.toggleDetails() },
-          svgIcon(ICON.details, 14), ' Details'),
+      h('div', { class: 'tb-end' },
+        h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
+        h('div', { class: 'group', role: 'group', 'aria-label': 'View' },
+          toggle(this.cards.groups, ICON.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
+          toggle(this.graph.focus, ICON.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
+          iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
+        ),
+        h('span', { class: 'tb-sep', 'aria-hidden': 'true' }),
+        toggle(this.detailsOpen, ICON.details, 'Details', 'Details sidebar (D)', () => this.toggleDetails()),
       ),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
@@ -1353,16 +1411,20 @@ class App {
         h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(undefined); } }, 'Full graph')),
       slices.map((s) =>
         h('div', { class: s.name === active ? 'slice active' : 'slice' },
-          h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
-          h('span', { class: 'muted small' }, describeSlice(s)),
-          h('div', { class: 'row' },
-            h('button', { onclick: () => { this.editingSlice = clone(s); (this.editingSlice as any).__orig = s.name; this.renderSettings(); } }, 'Edit'),
-            h('button', { class: 'danger', onclick: () => {
+          h('div', { class: 'slice-head' },
+            h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
+            h('button', { class: 'slice-icon', title: 'Edit slice', 'aria-label': `Edit slice ${s.name}`, onclick: () => {
+              this.editingSlice = clone(s);
+              (this.editingSlice as any).__orig = s.name;
+              this.renderSettings();
+            } }, svgIcon(ICON.pencil, 14)),
+            h('button', { class: 'slice-icon danger', title: 'Delete slice', 'aria-label': `Delete slice ${s.name}`, onclick: () => {
               this.map.settings.slices = slices.filter((x) => x !== s);
               if (active === s.name) this.map.settings.activeSlice = undefined;
               this.commit({ relayout: active === s.name });
-            } }, '✕'),
+            } }, svgIcon(ICON.trash, 14)),
           ),
+          h('span', { class: 'muted small' }, describeSlice(s)),
         ),
       ),
     );
@@ -1382,7 +1444,8 @@ class App {
     const types = uniqueTypes(this.map);
     const save = () => {
       const slices = (this.map.settings.slices ??= []);
-      const { __orig, ...slice } = s;
+      const { __orig, ...rest } = s;
+      const slice = tidySlice(rest);
       if (!slice.name.trim()) return;
       const idx = slices.findIndex((x) => x.name === (__orig ?? slice.name));
       if (idx >= 0) slices[idx] = slice;
@@ -1391,15 +1454,28 @@ class App {
       this.editingSlice = undefined;
       this.showSlice(slice.name);
     };
+    const names = this.map.nodes.map((n) => nameOf(n));
+    const nodeSuggestions = (p: string) =>
+      p === 'type' ? types.nodeTypes : p === 'tags' ? types.tags : p === 'name' ? names : p === 'id' ? this.map.nodes.map((n) => n.id) : [];
+    const edgeSuggestions = (p: string) =>
+      p === 'type' ? types.edgeTypes : p === 'tags' ? types.tags : p === 'label' ? [...new Set(this.map.edges.map((e) => e.label ?? '').filter(Boolean))] : [];
+    const count = h('p', { class: 'muted small filter-count' });
+    const updateCount = () => {
+      const res = computeSlice(this.map, s);
+      count.textContent = `Matches ${res.nodes.size} of ${this.map.nodes.length} nodes · ${res.edges.size} of ${this.map.edges.length} connections`;
+    };
+    updateCount();
     return h('div', { class: 'slice-editor' },
       h('h4', {}, s.__orig ? `Edit slice` : 'New slice'),
       field('Name', h('input', { value: s.name, oninput: (e: Event) => (s.name = (e.target as HTMLInputElement).value) })),
-      field('Node types', checklist(types.nodeTypes, s.nodeTypes, (v) => (s.nodeTypes = v))),
-      field('Tags (any of)', checklist(types.tags, s.tags, (v) => (s.tags = v))),
-      field('Dependency types', checklist(types.edgeTypes, s.edgeTypes, (v) => (s.edgeTypes = v))),
+      h('h4', {}, 'Nodes'),
+      filterEditor('node', s.nodeFilter, nodeSuggestions, (f) => { s.nodeFilter = f; updateCount(); }),
+      h('h4', {}, 'Connections'),
+      filterEditor('edge', s.edgeFilter, edgeSuggestions, (f) => { s.edgeFilter = f; updateCount(); }),
+      h('h4', {}, 'Neighbourhood'),
       field('Start nodes (ids, comma separated)',
         h('div', { class: 'row' },
-          h('input', { value: (s.roots ?? []).join(', '), onchange: (e: Event) => (s.roots = splitList((e.target as HTMLInputElement).value)) }),
+          h('input', { value: (s.roots ?? []).join(', '), onchange: (e: Event) => { s.roots = splitList((e.target as HTMLInputElement).value); updateCount(); } }),
           h('button', { title: 'Use selected nodes', onclick: () => {
             s.roots = this.selection.filter((id) => this.node(id));
             this.renderSettings();
@@ -1407,10 +1483,11 @@ class App {
         )),
       field('Follow edges', select(
         [{ value: 'downstream', label: 'Downstream (outgoing)' }, { value: 'upstream', label: 'Upstream (incoming)' }, { value: 'both', label: 'Both directions' }],
-        s.direction ?? 'downstream', (v) => (s.direction = v as any))),
+        s.direction ?? 'downstream', (v) => { s.direction = v as any; updateCount(); })),
       field('Max depth (empty = unlimited)', h('input', { type: 'number', min: 0, value: s.depth ?? '',
-        onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); } })),
-      h('p', { class: 'muted small' }, 'Filters combine: node types AND tags, edges by dependency type. With start nodes, only nodes reachable over the allowed edges are shown.'),
+        onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); updateCount(); } })),
+      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown.'),
+      count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
         h('button', { onclick: () => { this.editingSlice = undefined; this.renderSettings(); } }, 'Cancel'),
@@ -1421,9 +1498,10 @@ class App {
 
 function describeSlice(s: Slice): string {
   const parts: string[] = [];
-  if (s.nodeTypes?.length) parts.push(`types: ${s.nodeTypes.join(', ')}`);
-  if (s.tags?.length) parts.push(`tags: ${s.tags.join(', ')}`);
-  if (s.edgeTypes?.length) parts.push(`edges: ${s.edgeTypes.join(', ')}`);
+  const nodes = describeFilter(s.nodeFilter, 'node');
+  const edges = describeFilter(s.edgeFilter, 'edge');
+  if (nodes) parts.push(nodes);
+  if (edges) parts.push(`connections: ${edges}`);
   if (s.roots?.length) parts.push(`from ${s.roots.join(', ')} ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
   return parts.join(' · ') || 'everything';
 }

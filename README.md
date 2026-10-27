@@ -11,6 +11,10 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Cards** – every node is a card with an icon (picked from its type name) and its type.
   Tags stay off the card; the hover card and the details show them.
 - **Groups** – soft colored areas around nodes of the same type (`G` or the *Groups* button).
+  While groups are on, the layouts keep each group together where the connections allow it:
+  *Physics* and *fCoSE* start from an arrangement with one area per type, *Hierarchy* puts nodes of a
+  type side by side within a level, *Grid* and *Circle* sort by type. An area hugs its own cards; when a
+  card of another type is in the way, the group is split ("App · 1 of 2").
 - **Focus** – select a node: everything else fades and its connections flow (`F` or *Focus*).
 - **Zoom out** – cards turn into colored blocks and groups show big names. A minimap sits in the corner.
 - **Start** – an empty graph shows a big **+** (or press `Enter`) and three starter templates.
@@ -34,17 +38,35 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Details sidebar** (`D`, `⋯` or the *Details* button) – everything about the selection:
   name, type, tags, description, color, id and all connections; for a connection its
   direction, type, tags and label.
+- **Toolbar** – left the file, in the middle how the graph is arranged (Physics / Hierarchy / More…,
+  hierarchy type, *Layout ▾*) and what it shows (*Style ▾*, *Slices ▾*), on the right search, Groups,
+  Focus, Fit and Details – Details always at the right edge. In a narrow editor the buttons turn into
+  icons, the middle moves to a second row, and the search becomes an icon until you use it.
 - **Toolbar menus** – *Layout ▾* (spacing, edge length, direction, hierarchy types, run/fit),
   *Style ▾* (colors per type, tag and connection type) and *Slices ▾* (saved views).
 - **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
+- **Bottom bars** – hidden at first. The **?** button at the bottom left shows the keyboard shortcuts,
+  the **i** button next to it the legend and stats. Click again to hide. The choice is saved in the
+  settings `brainmap.showShortcuts` and `brainmap.showLegend` and holds for every file.
 - **View follows the selection** (Layout ▾ → "Center view on the selected node").
 - **Layouts** – *Physics* (cytoscape-cola, neighbours follow while you drag) and *Hierarchy*
   (dagre, rounded right-angle connections) in the toolbar; more under *More…*.
   Positions are not saved: the layout arranges the graph each time the file opens.
 - **Hierarchy by dependency type** – pick which connection types build the hierarchy.
 - **Proximity, styling and slices** – spacing, edge length per connection type,
-  colors by type or tag, and saved slices (filter by type, tag, connection type, neighbourhood).
+  colors by type or tag, and saved slices (filters plus a neighbourhood).
+- **Filters** (*Slices ▾* → *+ New slice* or *Edit*) – work like the filters of
+  [Bases](https://github.com/dom8509/vscode-bases): a filter is a property, an operator and a value.
+  Groups combine filters with *All*, *Any* or *None of the following* and can be nested.
+  - Nodes: name, id, type, tags, description, incoming, outgoing, connections
+    (e.g. *connections is 0* finds lonely nodes, *incoming ≥ 5* finds hubs).
+  - Connections: type, tags, label, direction (one-way / two-way).
+    Only kept connections are shown and followed from the start nodes.
+  - Operators: is, is not, contains, does not contain, starts with, has, does not have,
+    is empty, is not empty, >, ≥, <, ≤. Text compares ignore case.
+  - A filter without its value does not filter yet. The editor counts the matches as you type;
+    the *Slices* button shows how many nodes the active slice keeps (`6/10`).
 - **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
   `Shift+F` fit · `L` layout · `Ctrl+K` search · `Backspace` delete · `Esc` deselect · `Ctrl+Z` undo.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
@@ -76,12 +98,18 @@ settings:
       depends-on: { color: '#76b7b2', lineStyle: solid, length: 120 }
   slices:
     - name: Backend
-      nodeTypes: [service, database]
+      nodeFilter:              # and | or | not, nested as deep as you like
+        and:
+          - or:
+              - { property: type, op: is, value: service }
+              - { property: type, op: is, value: database }
+          - { property: tags, op: hasNot, value: legacy }
     - name: Web app dependencies
       roots: [web]
-      edgeTypes: [depends-on]
+      edgeFilter: { property: type, op: is, value: depends-on }
       direction: downstream    # downstream | upstream | both
       depth: 2
+    # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend
   sliceMode: hide              # hide | dim
 nodes:

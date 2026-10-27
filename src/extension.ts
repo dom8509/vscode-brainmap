@@ -82,12 +82,28 @@ class BrainMapEditorProvider implements vscode.CustomTextEditorProvider {
       if (document.getText() === lastWritten) return;
       sendDocument();
     });
-    panel.onDidDispose(() => changeSub.dispose());
+    const sendBars = () => {
+      const config = vscode.workspace.getConfiguration('brainmap');
+      post({ type: 'ui', bars: { legend: config.get('showLegend', false), hints: config.get('showShortcuts', false) } });
+    };
+    const configSub = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('brainmap.showLegend') || e.affectsConfiguration('brainmap.showShortcuts')) sendBars();
+    });
+    panel.onDidDispose(() => {
+      changeSub.dispose();
+      configSub.dispose();
+    });
 
     webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
       switch (msg.type) {
         case 'ready':
+          sendBars();
           sendDocument();
+          break;
+        case 'setBar':
+          await vscode.workspace
+            .getConfiguration('brainmap')
+            .update(msg.bar === 'legend' ? 'showLegend' : 'showShortcuts', msg.show, vscode.ConfigurationTarget.Global);
           break;
         case 'edit': {
           const text = document.getText();
