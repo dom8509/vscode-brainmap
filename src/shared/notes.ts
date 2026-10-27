@@ -27,6 +27,11 @@ export interface NoteSource {
   type?: string;
   /** The property that gives the name. Default: title, else the file name. */
   label?: string;
+  /**
+   * The properties whose values become connections. Their values may be [[links]] or plain
+   * names (`depends-on: api`). Left out: every property that holds a [[link]]. Empty: none.
+   */
+  links?: string[];
 }
 
 export interface BrainView {
@@ -45,6 +50,7 @@ export function readView(raw: unknown): BrainView {
   if (folders.length) source.folders = folders;
   if (typeof src.type === 'string' && src.type) source.type = src.type;
   if (typeof src.label === 'string' && src.label) source.label = src.label;
+  if (src.links !== undefined && src.links !== null) source.links = [...new Set(list(src.links).map((l) => l.trim()).filter(Boolean))];
   const map = normalize({ title: obj.title, settings: obj.settings });
   return { title: typeof obj.title === 'string' ? obj.title : undefined, source, settings: map.settings };
 }
@@ -84,6 +90,26 @@ function propertyLinks(value: unknown): string[] {
   return out;
 }
 
+/** The names a property chosen as links names: [[links]], else each plain text. */
+function chosenLinks(value: unknown): string[] {
+  const links = propertyLinks(value);
+  if (links.length) return links;
+  const texts = Array.isArray(value) ? value : [value];
+  return texts.filter((t): t is string | number => typeof t === 'string' || typeof t === 'number').map((t) => String(t).trim()).filter(Boolean);
+}
+
+/** The properties a view can pick as links: every property of its notes but type, tags and description. */
+export function linkCandidates(files: NoteFile[], view: BrainView): string[] {
+  const used = new Set([view.source.type ?? 'type', 'tags', 'tag', 'description']);
+  const names = new Set<string>();
+  for (const f of files) {
+    if (!isNote(f, view.source.folders)) continue;
+    for (const k of Object.keys(f.properties ?? {})) if (!used.has(k)) names.add(k);
+  }
+  for (const k of view.source.links ?? []) names.add(k);
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
 /** A property value as a filter can compare it: text, number or a list of texts. */
 function plain(value: unknown): unknown {
   if (value === null || value === undefined) return undefined;
@@ -97,6 +123,7 @@ function plain(value: unknown): unknown {
  * The graph of a view: one node per note (its path is its id), one connection per
  * link between two shown notes. A [[link]] in a property is a connection of that
  * property's name, e.g. `depends-on: [[api]]`; a link in the text has no type.
+ * With `source.links` only the properties listed there connect, and plain names count too.
  */
 export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   const notes = files.filter((f) => isNote(f, view.source.folders));
@@ -106,6 +133,7 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   const labelKey = view.source.label ?? 'title';
   // These are the node's own type, tags and description; every other property is data to filter on.
   const used = new Set([typeKey, 'tags', 'tag', 'description']);
+  const chosen = view.source.links && new Set(view.source.links);
 
   const nodes: BrainNode[] = [];
   const edges: BrainEdge[] = [];
@@ -130,7 +158,7 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
     const data: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(p)) {
       if (used.has(k)) continue;
-      const links = propertyLinks(v);
+      const links = !chosen ? propertyLinks(v) : chosen.has(k) ? chosenLinks(v) : [];
       for (const l of links) connect(f.path, resolve(l), k);
       // A link filters by the name it names: `depends-on has api`.
       data[k] = links.length ? links : plain(v) ?? '';

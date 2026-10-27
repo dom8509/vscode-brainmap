@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
 import { computeSlice, dataProperties } from '../src/shared/model';
-import { NoteFile, emptyView, notesToMap, readView } from '../src/shared/notes';
+import { NoteFile, emptyView, linkCandidates, notesToMap, readView } from '../src/shared/notes';
 
 const note = (path: string, properties: Record<string, unknown> = {}, links: string[] = [], tags: string[] = []): NoteFile => {
   const name = path.split('/').pop()!;
@@ -81,4 +81,29 @@ test('a view file keeps its source and settings, never nodes', () => {
   assert.match(out, /folders:\n {4}- notes/);
   assert.doesNotMatch(out, /nodes:/);
   assert.deepEqual(parseView(serializeView(view, 'json')).source, { folders: ['notes'] });
+});
+
+test('source.links picks the properties that connect, with plain names too', () => {
+  const view = readView({ source: { links: ['owners', 'owners', ' '] } });
+  assert.deepEqual(view.source.links, ['owners']);
+  const people = [...files, note('notes/ann.md')];
+  const map = notesToMap(people, view);
+  const edges = map.edges.map((e) => `${e.source} > ${e.target} ${e.type ?? ''}`.trim());
+  // depends-on is not picked, so its [[db]] makes no connection; owners: [ann, bob] does, by name.
+  assert.ok(edges.includes('notes/db.md > notes/ann.md owners'));
+  assert.ok(!edges.some((e) => e.endsWith('depends-on')));
+  // Text links stay.
+  assert.ok(edges.includes('notes/api.md > notes/web.md'));
+});
+
+test('empty source.links: no property links, and it is kept in the file', () => {
+  const view = readView({ source: { links: [] } });
+  assert.deepEqual(view.source.links, []);
+  assert.ok(!notesToMap(files, view).edges.some((e) => e.type));
+  assert.deepEqual(parseView(serializeView(view, 'yaml')).source.links, []);
+  assert.equal(parseView(serializeView(emptyView(), 'yaml')).source.links, undefined);
+});
+
+test('link candidates are the notes\' properties but type, tags and description', () => {
+  assert.deepEqual(linkCandidates(files, readView({ source: { links: ['extra'] } })), ['depends-on', 'extra', 'owners', 'priority', 'status', 'title']);
 });

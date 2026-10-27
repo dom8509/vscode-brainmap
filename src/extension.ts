@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { BasesApi, bases } from './bases';
 import { detectFormat, parse, parseView, serialize, serializeView } from './shared/format';
-import { notesToMap } from './shared/notes';
+import { linkCandidates, notesToMap } from './shared/notes';
 import { FileFormat, applyGlobalFilter, emptyMap, filterOptions } from './shared/model';
 import { HostMessage, WebviewMessage } from './shared/messages';
 
@@ -134,9 +134,11 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
         const files = api.files();
         uris = new Map(files.map((f) => [f.path, f.uri]));
         // Notes outside the global filter never reach the webview.
-        const all = notesToMap(files, parseView(text));
+        const view = parseView(text);
+        const all = notesToMap(files, view);
         const map = applyGlobalFilter(all);
-        post({ type: 'load', map, format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path), readOnly: true, options: filterOptions(all) });
+        const links = { chosen: view.source.links, properties: linkCandidates(files, view) };
+        post({ type: 'load', map, format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path), readOnly: true, options: filterOptions(all), links });
       } catch (err) {
         post({ type: 'error', message: `Could not read ${document.fileName}: ${(err as Error).message}` });
       }
@@ -186,6 +188,18 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
           await replaceText(document, next);
           // Another global filter loads other notes.
           if (filterChanged) send();
+          break;
+        }
+        case 'setLinks': {
+          const text = document.getText();
+          const view = parseView(text);
+          view.source.links = msg.links;
+          const next = serializeView(view, detectFormat(text, defaultFormat));
+          if (next === text) return;
+          lastWritten = next;
+          await replaceText(document, next);
+          // Other links make other connections.
+          send();
           break;
         }
         case 'open': {
