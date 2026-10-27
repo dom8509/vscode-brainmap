@@ -63,19 +63,29 @@ export function emptyView(): BrainView {
 const isNote = (f: NoteFile, folders: string[] | undefined) =>
   f.kind === 'markdown' && (!folders?.length || folders.some((d) => f.path.startsWith(`${d}/`)));
 
-/** Finds the note a [[link]] in a property names: by path, then by name when only one note has it. */
+/**
+ * Finds the note a link in a property names: by path, then by name, then by its `id`
+ * property; a name or id only counts when one note has it.
+ */
 function makeResolver(files: NoteFile[]): (raw: string) => string | undefined {
   const paths = new Set(files.map((f) => f.path));
-  const byName = new Map<string, string | null>();
-  for (const f of files) {
-    const name = f.basename.toLowerCase();
-    byName.set(name, byName.has(name) ? null : f.path);
-  }
+  const unique = (key: (f: NoteFile) => unknown) => {
+    const map = new Map<string, string | null>();
+    for (const f of files) {
+      const k = key(f);
+      if (typeof k !== 'string' && typeof k !== 'number') continue;
+      const name = String(k).trim().toLowerCase();
+      if (name) map.set(name, map.has(name) ? null : f.path);
+    }
+    return map;
+  };
+  const byName = unique((f) => f.basename);
+  const byId = unique((f) => f.properties?.id);
   return (raw) => {
     const v = raw.replace(/\\/g, '/').replace(/^\.?\//, '').trim();
     if (paths.has(v)) return v;
     if (paths.has(`${v}.md`)) return `${v}.md`;
-    return byName.get(v.split('/').pop()!.replace(/\.md$/i, '').toLowerCase()) ?? undefined;
+    return byName.get(v.split('/').pop()!.replace(/\.md$/i, '').toLowerCase()) ?? byId.get(v.toLowerCase()) ?? undefined;
   };
 }
 
@@ -90,12 +100,24 @@ function propertyLinks(value: unknown): string[] {
   return out;
 }
 
-/** The names a property chosen as links names: [[links]], else each plain text. */
+/** The fields of an object in a link property that name the note, the first one found wins. */
+const TARGET_KEYS = ['target', 'link', 'note', 'path', 'id', 'key'];
+
+/**
+ * The names a property chosen as links names: [[links]], else each plain text.
+ * An object names its `target` (or link, note, path, id, key): `refers_to: [{ target: api }]`.
+ */
 function chosenLinks(value: unknown): string[] {
-  const links = propertyLinks(value);
-  if (links.length) return links;
-  const texts = Array.isArray(value) ? value : [value];
-  return texts.filter((t): t is string | number => typeof t === 'string' || typeof t === 'number').map((t) => String(t).trim()).filter(Boolean);
+  const items = (Array.isArray(value) ? value : [value]).map((t) => {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return t;
+    const obj = t as Record<string, unknown>;
+    return TARGET_KEYS.map((k) => obj[k]).find((x) => typeof x === 'string' || typeof x === 'number');
+  });
+  return items.flatMap((t) => {
+    if (typeof t !== 'string' && typeof t !== 'number') return [];
+    const links = propertyLinks(String(t));
+    return links.length ? links : [String(t).trim()].filter(Boolean);
+  });
 }
 
 /** The properties a view can pick as links: every property of its notes but type, tags and description. */

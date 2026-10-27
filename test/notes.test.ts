@@ -107,3 +107,17 @@ test('empty source.links: no property links, and it is kept in the file', () => 
 test('link candidates are the notes\' properties but type, tags and description', () => {
   assert.deepEqual(linkCandidates(files, readView({ source: { links: ['extra'] } })), ['depends-on', 'extra', 'owners', 'priority', 'status', 'title']);
 });
+
+test('a chosen property of objects links by their target, to a file name or an id', () => {
+  const docs = [
+    note('notes/a.md', { refers_to: [{ target: 'ID_1', key: 'ID_1' }, { target: '[[c]]' }] }),
+    note('notes/b.md', { id: 'ID_1' }),
+    note('notes/c.md'),
+  ];
+  const map = notesToMap(docs, readView({ source: { links: ['refers_to'] } }));
+  assert.deepEqual(map.edges.map((e) => `${e.source} > ${e.target} ${e.type}`), [
+    'notes/a.md > notes/b.md refers_to',
+    'notes/a.md > notes/c.md refers_to',
+  ]);
+  assert.deepEqual(map.nodes[0].data?.refers_to, ['ID_1', 'c']);
+});
