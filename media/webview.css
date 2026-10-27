@@ -1464,6 +1464,7 @@ button:disabled {
   color: var(--bm-fg);
   font: inherit;
   justify-content: space-between;
+  text-align: left;
   height: 26px;
   padding: 0 6px;
   font-weight: normal;
@@ -1516,6 +1517,10 @@ button:disabled {
   border-radius: 3px;
   white-space: nowrap;
   cursor: pointer;
+}
+.picker-menu .picker-item {
+  /* The node picker spreads its items (name, hint); the property list keeps them on the left. */
+  justify-content: flex-start;
 }
 .picker-item:hover, .picker-item.active {
   color: var(--vscode-menu-selectionForeground, var(--bm-accent-fg));
