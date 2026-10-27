@@ -17,6 +17,83 @@ import {
 import { h, select } from './dom';
 
 /**
+ * Bases' property picker: a button that opens a list with a search box, the
+ * properties grouped by where they come from. Arrow keys, Enter and Escape work.
+ */
+function propertyPicker(groups: [string, FilterProperty[]][], current: string, label: string, onpick: (id: string) => void): HTMLElement {
+  const button = h('button', { class: 'filter-prop picker-button', title: 'Property', 'aria-haspopup': 'listbox' },
+    h('span', { class: 'picker-label' }, label), h('span', { class: 'picker-chevron', 'aria-hidden': 'true' }, '▾'));
+  let menu: HTMLElement | undefined;
+  const close = () => {
+    menu?.remove();
+    menu = undefined;
+    window.removeEventListener('mousedown', outside, true);
+  };
+  const outside = (e: Event) => {
+    if (!menu?.contains(e.target as Node) && !button.contains(e.target as Node)) close();
+  };
+  const open = () => {
+    const search = h('input', { type: 'search', class: 'picker-search', placeholder: 'Search properties…', 'aria-label': 'Search properties' });
+    const list = h('div', { class: 'picker-list', role: 'listbox' });
+    let shown: FilterProperty[] = [];
+    let active = 0;
+    const pick = (id: string) => {
+      close();
+      if (id !== current) onpick(id);
+    };
+    const draw = () => {
+      const q = search.value.trim().toLowerCase();
+      shown = [];
+      const rows: HTMLElement[] = [];
+      for (const [title, props] of groups) {
+        const hits = props.filter((p) => !q || p.label.toLowerCase().includes(q) || p.id.toLowerCase().includes(q));
+        if (!hits.length) continue;
+        rows.push(h('div', { class: 'picker-group' }, title));
+        for (const p of hits) {
+          const i = shown.push(p) - 1;
+          rows.push(h('div', { class: i === active ? 'picker-item active' : 'picker-item', role: 'option', 'aria-selected': String(p.id === current), title: p.id,
+            onmousedown: (e: Event) => { e.preventDefault(); pick(p.id); } },
+            h('span', { class: 'picker-check' }, p.id === current ? '✓' : ''), p.label));
+        }
+      }
+      list.replaceChildren(...(rows.length ? rows : [h('div', { class: 'picker-empty' }, 'No property matches')]));
+      list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+    };
+    search.addEventListener('input', () => { active = 0; draw(); });
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        active = (active + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % Math.max(1, shown.length);
+        draw();
+      } else if (e.key === 'Enter') {
+        if (shown[active]) pick(shown[active].id);
+      } else if (e.key === 'Escape') {
+        close();
+        button.focus();
+      } else return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    menu = h('div', { class: 'picker-menu floating-list' }, search, list);
+    active = Math.max(0, groups.flatMap(([, p]) => p).findIndex((p) => p.id === current));
+    draw();
+    document.body.append(menu);
+    // Fixed under the button, so the scrolling window around it does not cut it off.
+    const r = button.getBoundingClientRect();
+    const width = Math.max(220, r.width);
+    Object.assign(menu.style, {
+      left: `${Math.max(6, Math.min(r.left, window.innerWidth - width - 6))}px`,
+      top: `${r.bottom + 2}px`,
+      minWidth: `${width}px`,
+      maxHeight: `${Math.max(140, window.innerHeight - r.bottom - 12)}px`,
+    });
+    window.addEventListener('mousedown', outside, true);
+    search.focus();
+  };
+  button.addEventListener('click', () => (menu ? close() : open()));
+  return button;
+}
+
+/**
  * A value field whose list of known values opens on click, as in Bases: all of
  * them at first, then those that contain what is typed. Arrow keys and Enter pick.
  */
@@ -127,10 +204,7 @@ export function filterEditor(
       ['Properties', data.filter((p) => !p.id.startsWith('data.file.'))],
       ['File', data.filter((p) => p.id.startsWith('data.file.'))],
     ];
-    const option = (p: FilterProperty) => h('option', { value: p.id, selected: p.id === c.property }, p.label);
-    return h('select', { class: 'filter-prop', title: 'Property', onchange: (e: Event) => onchange((e.target as HTMLSelectElement).value) },
-      groups.flatMap(([label, props]) => (!props.length ? [] : label ? [h('optgroup', { label }, props.map(option))] : props.map(option))),
-    );
+    return propertyPicker(groups.map(([label, props]) => [label || (scope === 'node' ? 'Node' : 'Connection'), props]), c.property, propOf(c.property)?.label ?? c.property, onchange);
   };
 
   // A property the list does not offer (a data key no node has any more) stays pickable.

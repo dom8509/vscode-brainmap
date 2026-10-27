@@ -153,147 +153,150 @@ button:disabled {
 }
 
 /* ---------------------------------------------------------------- toolbar */
+/* One row, as in Bases: VS Code's own toolbar colors, flat buttons, popovers under them. */
 .toolbar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "brand main end";
-  align-items: center;
-  gap: 8px 16px;
-  min-height: 56px;
-  box-sizing: border-box;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--bm-border);
-  background: var(--bm-bar);
-}
-.brand {
-  grid-area: brand;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-  min-width: 0;
-}
-.brand .muted {
-  max-width: 180px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.brand .logo {
-  color: var(--bm-accent);
-  display: inline-flex;
-}
-.toolbar .group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.tb-main {
-  grid-area: main;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 20px;
-  min-width: 0;
-}
-.tb-main .group {
-  flex-wrap: wrap;
-}
-.search svg {
-  flex: none;
-}
-.tb-end {
-  grid-area: end;
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.tb-sep {
-  width: 1px;
-  height: 20px;
-  margin: 0 4px;
-  background: var(--bm-border);
-}
-.toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.segmented-bar {
+  --tb-hover: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--bm-raised);
-}
-.seg, .seg-select {
-  height: 28px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--bm-muted);
-  font-weight: 600;
-  font-size: 12px;
-}
-.seg-select {
-  padding: 0 6px;
-  width: auto;
-  max-width: 104px;
-}
-.seg:hover, .seg-select:hover {
-  color: var(--bm-fg);
-}
-.seg.active, .seg-select.active {
-  background: var(--bm-surface);
-  color: var(--bm-fg);
-  box-shadow: 0 1px 3px var(--bm-shadow);
-}
-.chip-select {
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  background: transparent;
-  border: 1px solid var(--bm-border);
-  font-size: 12px;
-}
-.search {
-  width: 190px;
+  min-width: 0;
   box-sizing: border-box;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border, var(--bm-border));
+  background: var(--bm-bg);
+}
+.toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--bm-fg);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.toolbar button:hover, .toolbar button.open {
+  background: var(--tb-hover);
+}
+.toolbar button:focus-visible {
+  outline: 1px solid var(--bm-accent);
+  outline-offset: -1px;
+}
+.toolbar svg {
+  flex: none;
+}
+.view-button {
+  font-weight: 600;
+  min-width: 0;
+  max-width: 280px;
+}
+.view-button .view-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-count {
+  margin-left: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--bm-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tb-spacer {
+  flex: 1;
+}
+.badge {
+  min-width: 16px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--vscode-badge-foreground, #fff);
+  background: var(--vscode-badge-background, #616161);
+  font-variant-numeric: tabular-nums;
+}
+.toolbar .tb-icon {
+  padding: 0 5px;
+  color: var(--bm-muted);
+}
+.toolbar .tb-icon:hover {
+  color: var(--bm-fg);
+}
+.toolbar .tb-icon.on {
+  color: var(--bm-accent);
+}
+.tb-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--vscode-panel-border, var(--bm-border));
+}
+.tb-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: var(--bm-raised);
+  gap: 4px;
+  height: 24px;
+  box-sizing: border-box;
+  margin-left: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--vscode-input-border, var(--bm-border));
+  border-radius: 4px;
+  background: var(--vscode-input-background, var(--bm-raised));
   color: var(--bm-muted);
 }
-.search input {
-  flex: 1;
+.tb-search:focus-within {
+  outline: 1px solid var(--bm-accent);
+}
+.tb-search input {
+  width: 150px;
   min-width: 0;
-  border: none;
-  background: transparent;
   padding: 0;
-}
-.toggle {
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--bm-border);
+  border: none;
+  outline: none;
   background: transparent;
-  color: var(--bm-muted);
-  font-weight: 600;
-  font-size: 12px;
-  transition: all 0.15s ease;
-}
-.toggle.on {
   color: var(--bm-fg);
-  border-color: color-mix(in srgb, var(--bm-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--bm-accent) 14%, transparent);
+  font: inherit;
+}
+
+/* Arrange (in the Layout window): Physics · Hierarchy · More… */
+.segmented-bar {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--vscode-input-border, var(--bm-border));
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pop-settings .segmented-bar .seg, .segmented-bar .seg-select {
+  cursor: pointer;
+  font: inherit;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--bm-fg);
+  font-weight: normal;
+}
+.segmented-bar > * + * {
+  border-left: 1px solid var(--vscode-input-border, var(--bm-border)) !important;
+}
+.segmented-bar .seg-select {
+  padding: 0 6px;
+  width: auto;
+  max-width: 130px;
+}
+.pop-settings .segmented-bar .seg.active, .segmented-bar .seg-select.active {
+  background: var(--vscode-button-background, var(--bm-accent-bg));
+  color: var(--vscode-button-foreground, var(--bm-accent-fg));
 }
 
 /* ---------------------------------------------------------------- stage */
@@ -1103,9 +1106,177 @@ button:disabled {
 /* ---------------------------------------------------------------- settings menus */
 .pop-settings {
   width: 320px;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+}
+/* A window's title row, as in Bases: name and ×. */
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.panel-title {
+  flex: 1;
+  font-weight: 600;
+}
+.pop-settings button.panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--bm-muted);
+}
+.pop-settings button.panel-close:hover {
+  color: var(--bm-fg);
+  background: var(--vscode-toolbar-hoverBackground, rgba(90, 93, 94, 0.31));
+}
+
+/* The slice menu: Bases' view menu. */
+.pop-menu {
+  min-width: 240px;
+  max-width: 360px;
   max-height: 70vh;
   overflow-y: auto;
-  padding: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, var(--bm-fg));
+  background: var(--vscode-menu-background, var(--bm-surface));
+  border-color: var(--vscode-menu-border, var(--bm-border));
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.menu-row:hover, .menu-row:focus-visible {
+  outline: none;
+  color: var(--vscode-menu-selectionForeground, var(--bm-accent-fg));
+  background: var(--vscode-menu-selectionBackground, var(--bm-accent-bg));
+}
+.menu-check {
+  display: inline-flex;
+  width: 14px;
+  flex: none;
+}
+.menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu-meta {
+  font-size: 12px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.menu-edit {
+  display: inline-flex;
+  visibility: hidden;
+  padding: 2px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.menu-row:hover .menu-edit, .menu-row:focus-visible .menu-edit, .menu-row.current .menu-edit {
+  visibility: visible;
+}
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--vscode-menu-separatorBackground, var(--bm-border));
+}
+
+/* The property picker with its search box. */
+.picker-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  cursor: pointer;
+}
+.pop-settings button.picker-button {
+  color: var(--bm-fg);
+  font: inherit;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 6px;
+  font-weight: normal;
+  background: var(--vscode-input-background, var(--bm-raised));
+  border: 1px solid var(--vscode-input-border, var(--bm-border));
+  border-radius: 2px;
+}
+.picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-chevron {
+  opacity: 0.7;
+  font-size: 10px;
+}
+.picker-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--vscode-menu-foreground, var(--bm-fg));
+  background: var(--vscode-menu-background, var(--bm-surface));
+  border: 1px solid var(--vscode-menu-border, var(--bm-border));
+  box-shadow: 0 4px 16px var(--bm-shadow);
+  font-size: 12px;
+}
+.picker-search {
+  margin: 0 0 4px;
+}
+.picker-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+.picker-group {
+  padding: 6px 6px 2px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--bm-muted);
+}
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.picker-item:hover, .picker-item.active {
+  color: var(--vscode-menu-selectionForeground, var(--bm-accent-fg));
+  background: var(--vscode-menu-selectionBackground, var(--bm-accent-bg));
+}
+.picker-check {
+  width: 12px;
+  flex: none;
+}
+.picker-empty {
+  padding: 6px;
+  color: var(--bm-muted);
 }
 .pop-settings > div {
   display: flex;
@@ -1122,18 +1293,18 @@ button:disabled {
 .pop-settings p, .panel p {
   margin: 0;
 }
-.pop-settings button:not(.pill):not(.chip-x) {
+.pop-settings button:where(:not(.pill, .chip-x, .panel-close, .picker-button, .seg, .link, .filter-x)) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--bm-border);
-  background: var(--bm-raised);
-  color: var(--bm-fg);
-  font-weight: 600;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  background: var(--vscode-button-secondaryBackground, var(--bm-raised));
+  color: var(--vscode-button-secondaryForeground, var(--bm-fg));
+  font-weight: normal;
 }
 .pop-settings button.primary {
   background: var(--bm-accent-bg);
@@ -1142,30 +1313,6 @@ button:disabled {
 }
 .pop-settings button.danger {
   color: var(--bm-danger);
-}
-.menu-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--bm-border);
-  background: transparent;
-  color: var(--bm-fg);
-  font-weight: 600;
-  font-size: 12px;
-  max-width: 200px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.menu-btn:hover, .menu-btn.open {
-  border-color: color-mix(in srgb, var(--bm-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--bm-accent) 12%, transparent);
-}
-.toggle svg {
-  vertical-align: -2px;
 }
 .value {
   min-width: 30px;
@@ -1222,55 +1369,10 @@ button:disabled {
   flex-wrap: wrap;
   gap: 2px 12px;
 }
-.slices {
+.slice-editor, .global-filter {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-.slice {
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.slice-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.slice-head a {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pop-settings .slice-head button.slice-icon {
-  flex: none;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--bm-muted);
-}
-.pop-settings .slice-head button.slice-icon:hover {
-  background: var(--bm-raised);
-  color: var(--bm-fg);
-}
-.pop-settings .slice-head button.slice-icon.danger:hover {
-  color: var(--bm-danger);
-}
-.slice.active {
-  border-color: color-mix(in srgb, var(--bm-accent) 50%, transparent);
-  background: color-mix(in srgb, var(--bm-accent) 10%, transparent);
-}
-.slice-editor {
-  border-top: 1px solid var(--bm-border);
-  padding-top: 10px;
+  gap: 10px;
 }
 .pop-settings:has(.filter-editor) {
   width: 440px;
@@ -1456,10 +1558,11 @@ button:disabled {
   z-index: 40;
   box-sizing: border-box;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: 8px;
+  color: var(--vscode-editorWidget-foreground, var(--bm-fg));
   background: var(--bm-surface);
-  border: 1px solid var(--bm-border);
-  box-shadow: 0 14px 34px var(--bm-shadow);
+  border: 1px solid var(--vscode-editorWidget-border, var(--bm-border));
+  box-shadow: 0 4px 16px var(--bm-shadow);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1612,59 +1715,21 @@ button:disabled {
 }
 
 /* ---------------------------------------------------------------- narrow toolbar */
-/* Narrower: the toggles lose their labels, then the middle moves to a second row. */
-@container app (max-width: 1480px) {
-  .tb-label {
+/* Narrow: the tools lose their words, then the count keeps only its number. */
+@container app (max-width: 720px) {
+  .tb-word {
     display: none;
   }
-  .search {
-    width: 160px;
-  }
-  .brand .muted {
-    max-width: 140px;
-  }
-  .toolbar .toggle {
-    width: 32px;
-    padding: 0;
+  .tb-search input {
+    width: 100px;
   }
 }
-@container app (max-width: 1340px) {
-  .toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "brand end" "main main";
-  }
-  /* In its own row the buttons flow as one line, so a wrapped button shares a line with the next ones. */
-  .tb-main {
-    gap: 8px;
-  }
-  .tb-main > .group {
-    display: contents;
-  }
-  .tb-main [data-menu="layout"] {
-    margin-right: 12px;
-  }
-}
-@container app (max-width: 560px) {
-  .brand b {
+@container app (max-width: 520px) {
+  .tb-long {
     display: none;
   }
-  .search kbd {
-    display: none;
-  }
-  .search {
-    width: 130px;
-  }
-}
-/* Very narrow: the search is an icon until it is used. */
-@container app (max-width: 440px) {
-  .search {
-    width: 32px;
-    padding: 0 9px;
-    cursor: text;
-    transition: width 0.15s ease;
-  }
-  .search:focus-within {
-    width: 150px;
+  .view-button {
+    max-width: 150px;
   }
 }
 

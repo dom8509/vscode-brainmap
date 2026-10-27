@@ -67,6 +67,8 @@ export class Popover {
 
   private esc = (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return;
+    // An open list inside (a property picker, a value list) closes first, on its own.
+    if (document.querySelector('.floating-list:not(.hidden)')) return;
     e.preventDefault();
     e.stopPropagation();
     this.close();

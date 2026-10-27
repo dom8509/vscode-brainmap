@@ -21,7 +21,7 @@ import {
   tidySlice,
   uniqueTypes,
 } from '../shared/model';
-import { FilterNode, describeFilter, prune } from '../shared/filter';
+import { FilterNode, countConditions, describeFilter, prune } from '../shared/filter';
 import { filterEditor } from './filterEditor';
 import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
@@ -34,7 +34,8 @@ import { Point, Popover, barButton, below, colorSwatches, tagPicker, typeList } 
 const vscode = acquireVsCodeApi();
 const post = (msg: WebviewMessage) => vscode.postMessage(msg);
 
-type Tab = 'style' | 'layout' | 'slices';
+/** The windows of the toolbar: the slice menu and a slice's settings on the left, the tools on the right. */
+type Tab = 'views' | 'slice' | 'layout' | 'style' | 'filter';
 
 interface UiState {
   details?: boolean;
@@ -106,6 +107,10 @@ const ICON = {
   type: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
   slice: '<path d="M4 6h16M7 12h10M10 18h4"/>',
   groups: '<rect x="3" y="3" width="11" height="11" rx="3"/><rect x="10" y="10" width="11" height="11" rx="3"/>',
+  layout: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h4a3 3 0 0 1 3 3V14"/>',
+  style: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/>',
+  filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
   focus: '<circle cx="12" cy="12" r="3"/><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>',
 };
 
@@ -358,10 +363,7 @@ class App {
       row('Folder', folders.map(([f, n]) => chip(f, n, () => this.pickSlice(`Folder: ${f}`, () => ({ name: `Folder: ${f}`, nodeFilter: { property: 'id', op: 'startsWith', value: `${f}/` } }))))),
       h('div', { class: 'templates' },
         h('button', { class: 'template', onclick: () => this.saveViewAsSlice() }, '+ New slice'),
-        h('button', { class: 'template', onclick: () => {
-          this.editingFilter = clone(this.map.settings.filter ?? { and: [] });
-          this.openSettings('slices');
-        } }, this.map.settings.filter ? 'Global filter…' : '+ Global filter'),
+        h('button', { class: 'template', onclick: () => this.openSettings('filter') }, this.map.settings.filter ? 'Global filter…' : '+ Global filter'),
         h('button', { class: 'template', onclick: () => {
           this.showAll = true;
           this.commit({ relayout: true, fit: true });
@@ -591,12 +593,15 @@ class App {
     this.graph.select([id]);
   }
 
-  /** ` · 12/40`: how many nodes the active slice shows. */
-  private sliceCount(): string {
-    const slice = this.map.settings.slices?.find((s) => s.name === this.map.settings.activeSlice);
-    if (!slice) return '';
+  /** Beside the slice switcher, as Bases shows its results: `493 of 3940 notes · 12 filtered out`. */
+  private countLabel(): [string, string] {
     const loaded = this.loadedMap();
-    return ` · ${computeSlice(loaded, slice).nodes.size}/${loaded.nodes.length}`;
+    const what = this.readOnly ? 'notes' : 'nodes';
+    const slice = this.map.settings.slices?.find((s) => s.name === this.map.settings.activeSlice);
+    const out = (this.options?.total ?? this.map.nodes.length) - loaded.nodes.length;
+    const rest = out > 0 ? ` · ${out} filtered out` : '';
+    if (!slice) return [`${loaded.nodes.length}`, ` ${what}${rest}`];
+    return [`${computeSlice(loaded, slice).nodes.size}`, ` of ${loaded.nodes.length} ${what}${rest}`];
   }
 
   private showSlice(name: string | undefined) {
@@ -781,7 +786,7 @@ class App {
     const nodes = this.selection.filter((id) => this.node(id));
     if (nodes.length) return this.sliceFrom(nodes, 'Selection', 'both', 1);
     this.editingSlice = { name: newId('Slice ', (this.map.settings.slices ?? []).map((s) => s.name)) };
-    this.openSettings('slices');
+    this.openSettings('slice');
   }
 
   private reverse(e: BrainEdge) {
@@ -798,7 +803,7 @@ class App {
   private onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      (this.toolbar.querySelector('.search input') as HTMLInputElement | null)?.focus();
+      this.openSearch();
       return;
     }
     const t = e.target as HTMLElement;
@@ -1444,23 +1449,53 @@ class App {
     const current = this.settings;
     if (current && Popover.current === current.pop) {
       current.pop.close();
-      if (current.kind === kind) return;
+      // The slice button closes a slice's settings rather than going back to the list.
+      if (current.kind === kind || (kind === 'views' && current.kind === 'slice')) return;
     }
-    const btn = this.toolbar.querySelector(`[data-menu="${kind}"]`);
+    if (kind === 'filter' && !this.editingFilter) this.editingFilter = clone(this.map.settings.filter ?? { and: [] });
+    if (kind === 'slice' && !this.editingSlice) this.editingSlice = { name: newId('Slice ', (this.map.settings.slices ?? []).map((s) => s.name)) };
+    const menu = kind === 'slice' ? 'views' : kind;
+    const btn = this.toolbar.querySelector(`[data-menu="${menu}"]`);
     const pop = new Popover(btn ? below(btn) : { x: 200, y: 60 }, [this.settingsBody(kind)], {
-      className: 'pop-settings',
-      owner: `[data-menu="${kind}"]`,
+      className: kind === 'views' ? 'pop-menu' : 'pop-settings',
+      owner: `[data-menu="${menu}"]`,
       onClose: () => {
         if (this.settings?.pop === pop) this.settings = undefined;
-        this.toolbar.querySelector(`[data-menu="${kind}"]`)?.classList.remove('open');
+        // A draft that was not applied is dropped with its window.
+        if (kind === 'filter') this.editingFilter = undefined;
+        if (kind === 'slice') this.editingSlice = undefined;
+        this.toolbar.querySelector(`[data-menu="${menu}"]`)?.classList.remove('open');
       },
     });
+    // The tools on the right open their window to the left, as in Bases.
+    if (btn && menu !== 'views') {
+      const r = btn.getBoundingClientRect();
+      pop.moveTo({ x: r.right - pop.el.offsetWidth, y: r.bottom + 6 });
+    }
     this.settings = { kind, pop };
-    this.toolbar.querySelector(`[data-menu="${kind}"]`)?.classList.add('open');
+    this.toolbar.querySelector(`[data-menu="${menu}"]`)?.classList.add('open');
+  }
+
+  private closeSettings() {
+    if (this.settings && Popover.current === this.settings.pop) this.settings.pop.close();
+  }
+
+  /** A window's title row: its name and ×. */
+  private panelHead(title: string) {
+    return h('div', { class: 'panel-head' },
+      h('span', { class: 'panel-title' }, title),
+      h('button', { class: 'panel-close', title: 'Close (Escape)', 'aria-label': 'Close', onclick: () => this.closeSettings() }, svgIcon(ICON.close, 14)),
+    );
   }
 
   private settingsBody(kind: Tab): HTMLElement {
-    return kind === 'style' ? this.stylePanel() : kind === 'slices' ? this.slicePanel() : this.layoutPanel();
+    switch (kind) {
+      case 'views': return this.viewMenu();
+      case 'slice': return h('div', {}, this.panelHead(this.editingSlice && (this.editingSlice as any).__orig ? 'Slice' : 'New slice'), this.sliceEditor(this.editingSlice!));
+      case 'style': return h('div', {}, this.panelHead('Style'), this.stylePanel());
+      case 'filter': return h('div', {}, this.panelHead('Filter'), this.globalFilterPanel());
+      default: return h('div', {}, this.panelHead('Layout'), this.layoutPanel());
+    }
   }
 
   /** Rebuilds the open settings menu, unless the user is typing in it. */
@@ -1469,109 +1504,88 @@ class App {
     if (!s || Popover.current !== s.pop) return;
     const active = document.activeElement as HTMLInputElement | null;
     if (active && s.pop.el.contains(active) && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && !['range', 'checkbox', 'color'].includes(active.type)))) return;
+    if (s.kind === 'slice' && !this.editingSlice) return s.pop.close();
     s.pop.set([this.settingsBody(s.kind)]);
   }
 
+  /** The search box opens from its icon (or Ctrl+K) and closes again with Escape. */
+  private searchOpen = false;
+  private searchText = '';
+
+  private openSearch() {
+    this.searchOpen = true;
+    this.renderToolbar();
+    (this.toolbar.querySelector('.tb-search input') as HTMLInputElement | null)?.focus();
+  }
+
+  /**
+   * One row, as in Bases: the slice switcher and the count on the left; Layout, Style and
+   * Filter as tools on the right, then search and the view toggles, Details last.
+   */
   private renderToolbar() {
     const types = uniqueTypes(this.map);
-    const l = this.layout;
-    const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
-    const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
-    const searchInput = h('input', {
-      type: 'search',
-      placeholder: 'Search…',
-      'aria-label': 'Search nodes',
-      onkeydown: (e: KeyboardEvent) => {
-        if (e.key !== 'Enter') return;
-        const hits = this.graph.highlightSearch((e.target as HTMLInputElement).value);
-        if (hits.length) {
-          this.graph.select(hits.slice(0, 1));
-          this.graph.centerOn(hits);
-        }
-      },
-      oninput: (e: Event) => this.graph.highlightSearch((e.target as HTMLInputElement).value),
-    });
-    const seg = (name: LayoutName, label: string) =>
-      h('button', { class: l.name === name ? 'seg active' : 'seg', onclick: () => l.name !== name && this.setLayout({ name }) }, label);
-    const others = LAYOUTS.filter((x) => x.value !== 'force' && x.value !== 'hierarchy');
-    const isOther = others.some((x) => x.value === l.name);
-    // The label hides when the bar gets narrow; the icon stays.
-    const toggle = (on: boolean, icon: string, label: string, title: string, onclick: () => void) =>
-      h('button', { class: on ? 'toggle on' : 'toggle', title, 'aria-label': label, 'aria-pressed': String(on), onclick },
-        svgIcon(icon, 14), h('span', { class: 'tb-label' }, label));
-    const iconBtn = (icon: string, title: string, onclick: () => void) =>
-      h('button', { class: 'icon-btn', title, 'aria-label': title, onclick }, svgIcon(icon));
-    const menuBtn = (kind: Tab, label: string) =>
-      h('button', {
-        class: this.settings?.kind === kind && Popover.current === this.settings.pop ? 'menu-btn open' : 'menu-btn',
-        'data-menu': kind,
-        onclick: () => this.openSettings(kind),
-      }, label, svgIcon(ICON.chevron, 11));
+    const open = (kind: Tab) => this.settings?.kind === kind && Popover.current === this.settings.pop;
+    const focused = document.activeElement?.closest?.('.tb-search') != null;
+    const tool = (kind: Tab, icon: string, label: string, badge = 0) =>
+      h('button', { class: open(kind) ? 'tb-tool open' : 'tb-tool', 'data-menu': kind, title: label, 'aria-haspopup': 'dialog', 'aria-expanded': String(open(kind)), onclick: () => this.openSettings(kind) },
+        svgIcon(icon, 16), h('span', { class: 'tb-word' }, label), badge > 0 && h('span', { class: 'badge' }, String(badge)));
+    const iconTool = (on: boolean | undefined, icon: string, title: string, onclick: () => void) =>
+      h('button', { class: on ? 'tb-icon on' : 'tb-icon', title, 'aria-label': title, 'aria-pressed': on === undefined ? undefined : String(on), onclick }, svgIcon(icon, 16));
     const slice = this.map.settings.activeSlice;
+    const [n, rest] = this.countLabel();
+    const search = this.searchOpen || this.searchText
+      ? h('label', { class: 'tb-search' }, svgIcon(ICON.search, 14),
+          h('input', {
+            type: 'search', placeholder: this.readOnly ? 'Search notes…' : 'Search nodes…', 'aria-label': 'Search', value: this.searchText,
+            oninput: (e: Event) => { this.searchText = (e.target as HTMLInputElement).value; this.graph.highlightSearch(this.searchText); },
+            onkeydown: (e: KeyboardEvent) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                this.searchText = '';
+                this.searchOpen = false;
+                this.graph.highlightSearch('');
+                this.renderToolbar();
+                return;
+              }
+              if (e.key !== 'Enter') return;
+              const hits = this.graph.highlightSearch(this.searchText);
+              if (hits.length) {
+                this.graph.select(hits.slice(0, 1));
+                this.graph.centerOn(hits);
+              }
+            },
+            onblur: () => { if (!this.searchText && this.searchOpen) { this.searchOpen = false; this.renderToolbar(); } },
+          }))
+      : iconTool(undefined, ICON.search, 'Search (Ctrl+K)', () => this.openSearch());
 
-    // Brand on the left; how the graph is arranged and what it shows in the middle; search and
-    // view toggles on the right, with Details always last. Narrow, the middle moves to a second row.
     this.toolbar.replaceChildren(
-      h('div', { class: 'brand' },
-        h('span', { class: 'logo' }, svgIcon(ICON.logo, 20)),
-        h('b', {}, 'BrainMap'),
-        this.fileName && h('span', { class: 'muted file-name', title: this.fileName }, `/ ${this.fileName}`),
-      ),
-      h('div', { class: 'tb-main' },
-        h('div', { class: 'group', role: 'group', 'aria-label': 'Arrange' },
-          h('div', { class: 'segmented-bar' },
-            seg('force', 'Physics'),
-            seg('hierarchy', 'Hierarchy'),
-            select(
-              [{ value: '', label: isOther ? '' : 'More…' }, ...others],
-              isOther ? l.name : '',
-              (v) => v && this.setLayout({ name: v as LayoutName }),
-              { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' },
-            ),
-          ),
-          (l.name === 'hierarchy' || l.name === 'breadthfirst') &&
-            select(
-              [
-                { value: '', label: 'by all types' },
-                ...types.edgeTypes.map((t) => ({ value: t, label: `by ${t}` })),
-                ...(hierarchyValue === '__multi' ? [{ value: '__multi', label: `by ${l.hierarchyEdgeTypes.join(', ')}` }] : []),
-              ],
-              hierarchyValue,
-              (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
-              { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
-            ),
-          lanes &&
-            select(
-              laneAttributes(this.map.nodes).map((a) => ({ value: a.value, label: `by ${a.label}` })),
-              l.laneBy,
-              (v) => this.setLayout({ laneBy: v }),
-              { class: 'chip-select', title: 'Attribute that puts nodes into columns or rows' },
-            ),
-          menuBtn('layout', 'Layout'),
-        ),
-        h('div', { class: 'group', role: 'group', 'aria-label': 'Show' },
-          menuBtn('style', 'Style'),
-          menuBtn('slices', slice ? `Slice: ${slice}${this.sliceCount()}` : 'Slices'),
-        ),
-      ),
-      h('div', { class: 'tb-end' },
-        h('label', { class: 'search' }, svgIcon(ICON.search, 14), searchInput, kbd('Ctrl K')),
-        h('div', { class: 'group', role: 'group', 'aria-label': 'View' },
-          toggle(this.cards.groups, ICON.groups, 'Groups', 'Show groups (G)', () => this.toggleGroups()),
-          toggle(this.graph.focus, ICON.focus, 'Focus', 'Dim everything not next to the selection (F)', () => this.toggleFocus()),
-          iconBtn(ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
-        ),
-        h('span', { class: 'tb-sep', 'aria-hidden': 'true' }),
-        toggle(this.detailsOpen, ICON.details, 'Details', 'Details sidebar (D)', () => this.toggleDetails()),
-      ),
+      h('button', { class: open('views') || open('slice') ? 'view-button open' : 'view-button', 'data-menu': 'views', title: 'Switch slice', 'aria-haspopup': 'menu', 'aria-expanded': String(open('views')),
+        onclick: () => this.openSettings('views') },
+        svgIcon(ICON.slice, 16), h('span', { class: 'view-name' }, slice ?? 'Full graph'), svgIcon(ICON.chevron, 12)),
+      h('span', { class: 'tb-count', title: 'Shown · loaded by the global filter · left out by it' }, n, h('span', { class: 'tb-long' }, rest)),
+      h('span', { class: 'tb-spacer' }),
+      tool('layout', ICON.layout, 'Layout'),
+      tool('style', ICON.style, 'Style'),
+      tool('filter', ICON.filter, 'Filter', countConditions(this.map.settings.filter)),
+      h('span', { class: 'tb-sep', 'aria-hidden': 'true' }),
+      search,
+      iconTool(this.cards.groups, ICON.groups, 'Groups (G)', () => this.toggleGroups()),
+      iconTool(this.graph.focus, ICON.focus, 'Focus: dim what is not next to the selection (F)', () => this.toggleFocus()),
+      iconTool(undefined, ICON.fit, 'Fit view (Shift+F)', () => this.graph.fit()),
+      iconTool(this.detailsOpen, ICON.details, 'Details (D)', () => this.toggleDetails()),
       datalist('dl-node-types', types.nodeTypes),
       datalist('dl-edge-types', types.edgeTypes),
       datalist('dl-tags', types.tags),
     );
+    if (focused) (this.toolbar.querySelector('.tb-search input') as HTMLInputElement | null)?.focus();
   }
 
   private stylePanel(): HTMLElement {
     const style = (this.map.settings.style ??= { colorBy: 'type' });
+    const sliceMode = field('Nodes outside the slice', select(
+      [{ value: 'hide', label: 'Hide' }, { value: 'dim', label: 'Dim' }],
+      this.map.settings.sliceMode ?? 'hide',
+      (v) => { this.map.settings.sliceMode = v as any; this.commit({ relayout: true }); }));
     const types = uniqueTypes(this.map);
     // Live preview for color pickers without re-rendering the panel.
     const color = (current: string, apply: (v: string) => void) =>
@@ -1608,6 +1622,7 @@ class App {
         style.colorBy ?? 'type',
         (v) => { style.colorBy = v as any; this.commit({ panel: false }); },
       )),
+      sliceMode,
       field('Connections show', select(
         [{ value: 'label', label: 'Label' }, { value: 'type', label: 'Type' }, { value: 'none', label: 'Nothing' }],
         style.edgeLabel ?? 'label',
@@ -1647,8 +1662,17 @@ class App {
     };
     const hierarchical = l.name === 'hierarchy' || l.name === 'breadthfirst';
     const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
+    const seg = (name: LayoutName, label: string) =>
+      h('button', { class: l.name === name ? 'seg active' : 'seg', 'aria-pressed': String(l.name === name), onclick: () => l.name !== name && this.setLayout({ name }) }, label);
+    const others = LAYOUTS.filter((x) => x.value !== 'force' && x.value !== 'hierarchy');
+    const isOther = others.some((x) => x.value === l.name);
     return h('div', {},
-      field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
+      field('Arrange', h('div', { class: 'segmented-bar' },
+        seg('force', 'Physics'),
+        seg('hierarchy', 'Hierarchy'),
+        select([{ value: '', label: isOther ? '' : 'More…' }, ...others], isOther ? l.name : '',
+          (v) => v && this.setLayout({ name: v as LayoutName }), { class: isOther ? 'seg-select active' : 'seg-select', title: 'Other layouts' }),
+      )),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
       slider(l.name === 'hierarchy' ? 'Level distance' : l.name === 'typeColumns' || l.name === 'typeRows' ? 'Lane distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },
@@ -1712,44 +1736,40 @@ class App {
 
   private sliceFrom(roots: string[], name?: string, direction: Slice['direction'] = 'downstream', depth?: number) {
     this.editingSlice = { name: name ?? `${nameOf(this.node(roots[0]))} neighbourhood`, roots, direction, depth };
-    this.openSettings('slices');
+    this.openSettings('slice');
   }
 
-  private slicePanel(): HTMLElement {
-    const slices = (this.map.settings.slices ??= []);
+  /** The slices as Bases lists its views: a check on the shown one, a count, a pencil to edit. */
+  private viewMenu(): HTMLElement {
+    const slices = this.map.settings.slices ?? [];
     const active = this.map.settings.activeSlice;
-    const list = h('div', { class: 'slices' },
-      h('div', { class: active ? 'slice' : 'slice active' },
-        h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(undefined); } }, 'Full graph')),
-      slices.map((s) =>
-        h('div', { class: s.name === active ? 'slice active' : 'slice' },
-          h('div', { class: 'slice-head' },
-            h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.showSlice(s.name); } }, s.name),
-            h('button', { class: 'slice-icon', title: 'Edit slice', 'aria-label': `Edit slice ${s.name}`, onclick: () => {
-              this.editingSlice = clone(s);
-              (this.editingSlice as any).__orig = s.name;
-              this.renderSettings();
-            } }, svgIcon(ICON.pencil, 14)),
-            h('button', { class: 'slice-icon danger', title: 'Delete slice', 'aria-label': `Delete slice ${s.name}`, onclick: () => {
-              this.map.settings.slices = slices.filter((x) => x !== s);
-              if (active === s.name) this.map.settings.activeSlice = undefined;
-              this.commit({ relayout: active === s.name });
-            } }, svgIcon(ICON.trash, 14)),
-          ),
-          h('span', { class: 'muted small' }, describeSlice(s)),
-        ),
-      ),
-    );
-    return h('div', {},
-      this.globalFilterPanel(),
-      field('Nodes outside the slice', select(
-        [{ value: 'hide', label: 'Hide' }, { value: 'dim', label: 'Dim' }],
-        this.map.settings.sliceMode ?? 'hide',
-        (v) => { this.map.settings.sliceMode = v as any; this.commit({ relayout: true }); })),
-      list,
-      this.editingSlice
-        ? this.sliceEditor(this.editingSlice)
-        : h('button', { onclick: () => { this.editingSlice = { name: newId('Slice ', slices.map((s) => s.name)) }; this.renderSettings(); } }, '+ New slice'),
+    const loaded = this.loadedMap();
+    const pick = (name: string | undefined) => {
+      this.closeSettings();
+      this.showSlice(name);
+    };
+    const row = (name: string | undefined, count: number, slice?: Slice) =>
+      h('div', { class: (active ?? undefined) === name ? 'menu-row current' : 'menu-row', role: 'menuitemradio', 'aria-checked': String((active ?? undefined) === name), tabindex: 0,
+        title: slice ? describeSlice(slice) : 'Every loaded node',
+        onclick: () => pick(name),
+        onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') pick(name); } },
+        h('span', { class: 'menu-check' }, (active ?? undefined) === name && svgIcon(ICON.check, 13)),
+        h('span', { class: 'menu-label' }, name ?? 'Full graph'),
+        h('span', { class: 'menu-meta' }, String(count)),
+        slice && h('button', { class: 'menu-edit', title: 'Edit slice', 'aria-label': `Edit slice ${slice.name}`, onclick: (e: Event) => {
+          e.stopPropagation();
+          this.closeSettings();
+          this.editingSlice = { ...clone(slice), __orig: slice.name } as Slice;
+          this.openSettings('slice');
+        } }, svgIcon(ICON.pencil, 13)));
+    return h('div', { class: 'view-menu', role: 'menu' },
+      row(undefined, loaded.nodes.length),
+      slices.length > 0 && h('div', { class: 'menu-sep' }),
+      slices.map((sl) => row(sl.name, computeSlice(loaded, sl).nodes.size, sl)),
+      h('div', { class: 'menu-sep' }),
+      h('div', { class: 'menu-row', role: 'menuitem', tabindex: 0, onclick: () => { this.closeSettings(); this.saveViewAsSlice(); },
+        onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') { this.closeSettings(); this.saveViewAsSlice(); } } },
+        h('span', { class: 'menu-check' }, svgIcon(ICON.plus, 13)), h('span', { class: 'menu-label' }, 'New slice')),
     );
   }
 
@@ -1757,43 +1777,31 @@ class App {
   private globalFilterPanel(): HTMLElement {
     const filter = prune(this.map.settings.filter);
     const total = this.options?.total ?? this.map.nodes.length;
-    const loaded = this.loadedMap().nodes.length;
     const what = this.readOnly ? 'notes' : 'nodes';
-    const summary = filter
-      ? `Loads ${loaded} of ${total} ${what}: ${describeFilter(filter, 'node')}`
-      : `Loads all ${total} ${what}. Set a filter to load only some: slices and the full graph then see nothing else.`;
-    const draft = this.editingFilter;
-    if (!draft)
-      return h('div', { class: 'global-filter' },
-        h('h4', {}, 'Global filter'),
-        h('p', { class: 'muted small' }, summary),
-        h('button', { onclick: () => { this.editingFilter = clone(this.map.settings.filter ?? { and: [] }); this.renderSettings(); } },
-          filter ? 'Edit global filter' : '+ Global filter'),
-      );
+    const draft = (this.editingFilter ??= clone(this.map.settings.filter ?? { and: [] }));
     // A .brainview has only the loaded notes here: the host knows the others' values.
     const opts = this.options ?? filterOptions(this.map);
     const suggestions = (p: string) => opts.values[p] ?? [];
     const count = h('p', { class: 'muted small filter-count' });
     const updateCount = () => {
       count.textContent = this.readOnly
-        ? 'Apply to load the matching notes.'
-        : `Would load ${applyGlobalFilter({ ...this.map, settings: { ...this.map.settings, filter: this.editingFilter } }).nodes.length} of ${total} nodes`;
+        ? `Loads ${this.loadedMap().nodes.length} of ${total} notes now. Apply to load the matches.`
+        : `Would load ${applyGlobalFilter({ ...this.map, settings: { ...this.map.settings, filter: this.editingFilter } }).nodes.length} of ${total} nodes.`;
     };
     updateCount();
     const apply = (next: FilterNode | undefined) => {
       this.map.settings.filter = prune(next);
-      this.editingFilter = undefined;
+      this.closeSettings();
       this.commit({ relayout: true, fit: true });
     };
-    return h('div', { class: 'global-filter slice-editor' },
-      h('h4', {}, 'Global filter'),
-      h('p', { class: 'muted small' }, `Only ${what} that match are loaded, for every slice and the full graph.`),
+    return h('div', { class: 'global-filter' },
+      h('p', { class: 'muted small' }, `Only ${what} that match are loaded. Every slice and the full graph work on these.`),
       filterEditor('node', draft, suggestions, (f) => { this.editingFilter = f; updateCount(); }, opts.properties),
       count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: () => apply(this.editingFilter) }, 'Apply'),
-        h('button', { onclick: () => { this.editingFilter = undefined; this.renderSettings(); } }, 'Cancel'),
-        filter && h('button', { onclick: () => apply(undefined) }, 'Remove'),
+        h('button', { onclick: () => this.closeSettings() }, 'Cancel'),
+        filter && h('button', { onclick: () => apply(undefined) }, 'Remove filter'),
       ),
     );
   }
@@ -1809,7 +1817,7 @@ class App {
       if (idx >= 0) slices[idx] = slice;
       else slices.push(slice);
       if (__orig && this.map.settings.activeSlice === __orig) this.map.settings.activeSlice = slice.name;
-      this.editingSlice = undefined;
+      this.closeSettings();
       this.showSlice(slice.name);
     };
     const names = this.map.nodes.map((n) => nameOf(n));
@@ -1830,7 +1838,6 @@ class App {
     };
     updateCount();
     return h('div', { class: 'slice-editor' },
-      h('h4', {}, s.__orig ? `Edit slice` : 'New slice'),
       field('Name', h('input', { value: s.name, oninput: (e: Event) => (s.name = (e.target as HTMLInputElement).value) })),
       h('h4', {}, 'Nodes'),
       filterEditor('node', s.nodeFilter, nodeSuggestions, (f) => { s.nodeFilter = f; updateCount(); }, dataProperties(this.map)),
@@ -1860,7 +1867,15 @@ class App {
       count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
-        h('button', { onclick: () => { this.editingSlice = undefined; this.renderSettings(); } }, 'Cancel'),
+        h('button', { onclick: () => this.closeSettings() }, 'Cancel'),
+        s.__orig && h('button', { class: 'danger', onclick: () => {
+          const name = s.__orig;
+          this.map.settings.slices = (this.map.settings.slices ?? []).filter((x) => x.name !== name);
+          const wasShown = this.map.settings.activeSlice === name;
+          if (wasShown) this.map.settings.activeSlice = undefined;
+          this.closeSettings();
+          this.commit({ relayout: wasShown });
+        } }, 'Delete slice'),
       ),
     );
   }
