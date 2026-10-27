@@ -12,7 +12,7 @@ import {
   resolveEdgeStyle,
   resolveNodeStyle,
 } from '../shared/model';
-import { CARD_HEIGHT } from './cards';
+import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
 import { laneLayout, laneOf } from './lanes';
 
 cytoscape.use(cola);
@@ -481,14 +481,29 @@ export class GraphView {
     const byType = (a: any, b: any) =>
       a.isNode() && b.isNode() ? String(a.data('group') || '\uffff').localeCompare(String(b.data('group') || '\uffff')) : 0;
     const force = l.name === 'force' || l.name === 'fcose';
+    const large = force && visible.nodes().length >= LARGE_GRAPH;
     // Force layouts start from an arrangement where each group is one area, then refine it.
-    const start = grouped && force ? this.groupedPositions(visible, l, lengthOf) : undefined;
+    const start = grouped && force && !large ? this.groupedPositions(visible, l, lengthOf) : undefined;
     // While live physics runs, helper edges keep the groups together.
     const ghosts = start && l.name === 'force' ? this.addGroupEdges(visible.nodes()) : undefined;
     if (ghosts) eles = visible.union(ghosts);
     // Helper edges are a bit longer than real ones: connections win.
     const length = (edge: any) => (edge.hasClass('ghost') ? l.edgeLength * GHOST_LENGTH : lengthOf(edge));
-    switch (l.name) {
+    switch (large ? 'large' : l.name) {
+      case 'large':
+        options = {
+          name: 'fcose',
+          ...anim,
+          animate: false,
+          fit: true,
+          quality: 'draft',
+          randomize: true,
+          nodeSeparation: l.nodeSpacing,
+          idealEdgeLength: length,
+          nodeRepulsion: () => 4500 + l.nodeSpacing * 100,
+          edgeElasticity: () => 0.45,
+        };
+        break;
       case 'force':
       default:
         options = {
@@ -590,7 +605,7 @@ export class GraphView {
         if (selected.length) this.centerOn(selected);
         else if ((fit && l.name === 'force' && l.live) || !this.allInView()) this.fit();
       };
-      if (l.name === 'force' && l.live) {
+      if (l.name === 'force' && l.live && !large) {
         window.setTimeout(() => this.layout === layout && settle(), 1200);
         // Physics may still spread the graph out after that: fit once more if it grew out of view.
         window.setTimeout(() => this.layout === layout && !this.allInView() && settle(), 3000);

@@ -9,6 +9,12 @@ const HULL_PAD = 24;
 const HULL_TOP = 34;
 /** Below this zoom cards collapse to colored blocks and groups show big names. */
 const LOD_ZOOM = 0.45;
+/**
+ * From this many shown nodes on, the graph takes the fast path: the force layouts
+ * run once (fCoSE, draft quality, no grouped start) instead of live physics, and
+ * groups draw no areas. Otherwise a big graph blocks the editor for minutes.
+ */
+export const LARGE_GRAPH = 400;
 
 const ICONS: Record<string, string> = {
   app: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
@@ -207,7 +213,8 @@ export class CardLayer {
   private updateHulls(zoom: number, pan: { x: number; y: number }) {
     const groups = new Map<string, { color: string; name: string; n: number; boxes: Rect[]; cards: Rect[] }>();
     const all: { type: string; card: Rect }[] = [];
-    if (this.groups) {
+    // In a large graph the areas break into hundreds of pieces and cost seconds: none then.
+    if (this.groups && this.cy.nodes().not('.hidden').length < LARGE_GRAPH) {
       this.cy.nodes().forEach((n) => {
         if (n.hasClass('hidden')) return;
         const p = n.position();
