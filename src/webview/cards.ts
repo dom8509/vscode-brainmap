@@ -71,6 +71,8 @@ export class CardLayer {
   private ready = false;
   private editing?: string;
   groups = true;
+  /** Zoomed far out, cards turn into plain blocks without text. */
+  simplify = true;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
     this.hullSvg.setAttribute('class', 'hull-svg');
@@ -100,7 +102,7 @@ export class CardLayer {
     const cy = this.cy;
     const zoom = cy.zoom();
     const pan = cy.pan();
-    const low = zoom < LOD_ZOOM;
+    const low = this.simplify && zoom < LOD_ZOOM;
     this.cardLayer.classList.toggle('lod-low', low);
     this.hullLayer.classList.toggle('lod-low', low);
 

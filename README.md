@@ -94,6 +94,7 @@ settings:
   style:
     colorBy: type              # type | tag | none
     edgeLabel: label           # what connections show: label | type | none
+    simplifyZoomedOut: true    # zoomed far out, nodes become blocks without text
     nodeTypes:
       service: { color: '#59a14f', shape: round-rectangle, size: 40 }
     tags:

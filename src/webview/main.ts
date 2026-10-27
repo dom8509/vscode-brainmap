@@ -235,6 +235,7 @@ class App {
     this.format = msg.format;
     this.fileName = msg.fileName;
     this.graph.follow = this.layout.followSelection;
+    this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
     this.renderToolbar();
     this.graph.sync(this.map);
@@ -266,7 +267,9 @@ class App {
   /** Applies a model change: re-syncs the graph, re-renders UI and persists. */
   private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean; popup?: boolean } = {}) {
     this.graph.follow = this.layout.followSelection;
+    this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     this.graph.sync(this.map);
+    this.cards.schedule();
     // New or removed nodes/connections re-run the layout so the graph stays arranged.
     if (this.structureChanged() || opts.relayout) this.graph.runLayout(this.map, { fit: opts.fit ?? false });
     this.renderToolbar();
@@ -1366,6 +1369,10 @@ class App {
         style.edgeLabel ?? 'label',
         (v) => { style.edgeLabel = v as any; this.commit({ panel: false }); },
       )),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: style.simplifyZoomedOut ?? true,
+          onchange: (e: Event) => { style.simplifyZoomedOut = (e.target as HTMLInputElement).checked; this.commit({ panel: false }); } }),
+        'Hide text on nodes when zoomed far out'),
       h('h4', {}, 'Node types'), nodeRows.length ? nodeRows : h('p', { class: 'muted' }, 'No node types yet. Set a type in the inspector.'),
       h('h4', {}, 'Tags'), tagRows.length ? tagRows : h('p', { class: 'muted' }, 'No tags yet.'),
       h('h4', {}, 'Dependency (edge) types'),
