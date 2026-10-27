@@ -104,7 +104,8 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   const resolve = makeResolver(files.filter((f) => f.kind === 'markdown'));
   const typeKey = view.source.type ?? 'type';
   const labelKey = view.source.label ?? 'title';
-  const used = new Set([typeKey, labelKey, 'tags', 'tag', 'description']);
+  // These are the node's own type, tags and description; every other property is data to filter on.
+  const used = new Set([typeKey, 'tags', 'tag', 'description']);
 
   const nodes: BrainNode[] = [];
   const edges: BrainEdge[] = [];
@@ -130,10 +131,15 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
     for (const [k, v] of Object.entries(p)) {
       if (used.has(k)) continue;
       const links = propertyLinks(v);
-      if (links.length) for (const l of links) connect(f.path, resolve(l), k);
-      else if (plain(v) !== undefined) data[k] = plain(v);
+      for (const l of links) connect(f.path, resolve(l), k);
+      // A link filters by the name it names: `depends-on has api`.
+      data[k] = links.length ? links : plain(v) ?? '';
     }
-    if (Object.keys(data).length) node.data = data;
+    // The file's own fields, as Bases has them.
+    data['file.name'] = f.basename;
+    data['file.folder'] = f.folder;
+    data['file.path'] = f.path;
+    node.data = data;
     nodes.push(node);
     for (const l of f.links ?? []) connect(f.path, l.target, l.type);
   }

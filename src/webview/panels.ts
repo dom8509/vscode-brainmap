@@ -59,6 +59,8 @@ export class Popover {
     const t = e.target as Element;
     const owner = this.opts.owner;
     if (this.el.contains(t)) return;
+    // A list a field inside opened over the page (e.g. a filter's values) belongs to the popover.
+    if (t.closest?.('.floating-list')) return;
     if (typeof owner === 'string' ? t.closest?.(owner) : owner?.contains(t)) return;
     this.close();
   };

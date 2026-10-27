@@ -87,8 +87,10 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
   or a row of Bases' link database (with its type).
 - **Read-only.** Double-click a note (or `Enter`) to open it beside the graph and change it there;
   the graph follows. Layout, style and slices work as in a `.brainmap` and are saved in the `.brainview`.
-- **Filter on any property:** in a slice, properties show up by their name (`status is done`,
-  `priority ≥ 2`, `owners has ann`); in the file they are `data.<name>`.
+- **Filter on any property, as in Bases:** in a slice, every frontmatter property shows up by its name
+  (`status is done`, `priority ≥ 2`, `owners has ann`, `depends-on has api`), and so do `file.name`,
+  `file.folder` and `file.path`. A click in the value field lists every value the notes have; typing narrows it.
+  In the file they are `data.<name>`.
 - **Large views start with a choice.** From 400 notes on, a view without an active slice shows no graph
   but its slices, its biggest types and folders (a click makes and shows a slice) and *Show all anyway*.
   Large graphs are laid out once instead of with live physics; past 1500 nodes as a grid by type.

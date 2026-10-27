@@ -1265,7 +1265,7 @@ class App {
       !!node.type && field('Type', h('span', {}, node.type)),
       !!node.tags?.length && field('Tags', h('span', {}, node.tags.map((t) => `#${t}`).join(' '))),
       !!node.description && field('Description', h('span', {}, node.description)),
-      ...Object.entries(node.data ?? {}).map(([k, v]) => field(k, h('span', {}, text(v)))),
+      ...Object.entries(node.data ?? {}).filter(([k]) => !k.startsWith('file.')).map(([k, v]) => field(k, h('span', {}, text(v)))),
       this.connections(node),
     ];
   }
@@ -1737,9 +1737,11 @@ class App {
     };
     const names = this.map.nodes.map((n) => nameOf(n));
     const dataValues = (key: string) =>
-      [...new Set(this.map.nodes.flatMap((n) => { const v = n.data?.[key]; return v === undefined || v === null ? [] : Array.isArray(v) ? v.map(String) : [String(v)]; }))].sort();
+      [...new Set(this.map.nodes.flatMap((n) => { const v = n.data?.[key]; return v === undefined || v === null ? [] : Array.isArray(v) ? v.map(String) : [String(v)]; }).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
     const nodeSuggestions = (p: string) =>
       p === 'type' ? types.nodeTypes : p === 'tags' ? types.tags : p === 'name' ? names : p === 'id' ? this.map.nodes.map((n) => n.id)
+        : p === 'description' ? [...new Set(this.map.nodes.map((n) => n.description ?? '').filter(Boolean))]
         : p.startsWith('data.') ? dataValues(p.slice(5)) : [];
     const edgeSuggestions = (p: string) =>
       p === 'type' ? types.edgeTypes : p === 'tags' ? types.tags : p === 'label' ? [...new Set(this.map.edges.map((e) => e.label ?? '').filter(Boolean))] : [];

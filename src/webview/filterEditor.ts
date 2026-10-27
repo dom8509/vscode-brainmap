@@ -16,7 +16,69 @@ import {
 } from '../shared/filter';
 import { h, select } from './dom';
 
-let listCounter = 0;
+/**
+ * A value field whose list of known values opens on click, as in Bases: all of
+ * them at first, then those that contain what is typed. Arrow keys and Enter pick.
+ */
+function valueInput(value: string, values: string[], numeric: boolean, onchange: (v: string) => void): HTMLElement {
+  const input = h('input', { type: numeric ? 'number' : 'text', value, placeholder: values.length ? `value · ${values.length} known` : 'value' });
+  if (!values.length) {
+    input.addEventListener('input', () => onchange(input.value));
+    return input;
+  }
+  const list = h('div', { class: 'filter-suggest floating-list hidden', role: 'listbox' });
+  let shown: string[] = [];
+  let active = -1;
+  const pick = (v: string) => {
+    input.value = v;
+    onchange(v);
+    close();
+  };
+  const draw = () => {
+    list.replaceChildren(...shown.map((v, i) =>
+      h('div', { class: i === active ? 'filter-suggest-item active' : 'filter-suggest-item', role: 'option', title: v,
+        onmousedown: (e: Event) => { e.preventDefault(); pick(v); } }, v)));
+    list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  };
+  const open = (all: boolean) => {
+    const q = input.value.trim().toLowerCase();
+    shown = values.filter((v) => all || !q || v.toLowerCase().includes(q)).slice(0, 300);
+    active = -1;
+    if (!shown.length) return close();
+    // Fixed, so the scrolling panel around it does not cut it off.
+    const r = input.getBoundingClientRect();
+    Object.assign(list.style, { left: `${r.left}px`, top: `${r.bottom + 2}px`, minWidth: `${r.width}px`, maxHeight: `${Math.max(120, window.innerHeight - r.bottom - 12)}px` });
+    if (!list.isConnected) document.body.append(list);
+    list.classList.remove('hidden');
+    draw();
+  };
+  const close = () => {
+    list.classList.add('hidden');
+    list.remove();
+  };
+  input.addEventListener('focus', () => open(true));
+  input.addEventListener('click', () => list.isConnected || open(true));
+  input.addEventListener('input', () => {
+    onchange(input.value);
+    open(false);
+  });
+  input.addEventListener('blur', close);
+  input.addEventListener('keydown', (e) => {
+    if (!list.isConnected) {
+      if (e.key === 'ArrowDown') open(true);
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length;
+      draw();
+    } else if (e.key === 'Enter' && active >= 0) pick(shown[active]);
+    else if (e.key === 'Escape') close();
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  return input;
+}
 
 /**
  * Edits a filter tree in place, as the filter menu of Obsidian Bases does: rows of
@@ -31,7 +93,6 @@ export function filterEditor(
   /** More properties to offer, e.g. the keys of the nodes' data. */
   extra: FilterProperty[] = [],
 ): HTMLElement {
-  const props = [...propertiesFor(scope), ...extra];
   const propOf = (id: string) => propertyOf(scope, id, extra);
   const root: FilterGroup = value && isGroup(value) ? value : makeGroup('and', value ? [value] : []);
   const el = h('div', { class: 'filter-editor' });
@@ -53,17 +114,22 @@ export function filterEditor(
     if (!op?.needsValue) return null;
     if (prop?.choices)
       return select(prop.choices.map((v) => ({ value: v })), c.value, (v) => { c.value = v; changed(); }, { class: 'filter-value' });
-    const id = `filter-values-${++listCounter}`;
-    const values = suggestions(c.property);
     return h('span', { class: 'filter-value' },
-      h('input', {
-        type: prop?.kind === 'number' ? 'number' : 'text',
-        value: c.value ?? '',
-        placeholder: 'value',
-        list: values.length ? id : undefined,
-        oninput: (e: Event) => { c.value = (e.target as HTMLInputElement).value; changed(); },
-      }),
-      values.length > 0 && h('datalist', { id }, values.map((v) => h('option', { value: v }))),
+      valueInput(c.value ?? '', suggestions(c.property), prop?.kind === 'number', (v) => { c.value = v; changed(); }));
+  };
+
+  // The properties by where they come from: the node's own, its data, and (for notes) its file.
+  const propertySelect = (c: FilterCondition, onchange: (v: string) => void) => {
+    const own = propertiesFor(scope);
+    const data = withCurrent(extra, c.property).filter((p) => !own.some((o) => o.id === p.id));
+    const groups: [string, FilterProperty[]][] = [
+      ['', own],
+      ['Properties', data.filter((p) => !p.id.startsWith('data.file.'))],
+      ['File', data.filter((p) => p.id.startsWith('data.file.'))],
+    ];
+    const option = (p: FilterProperty) => h('option', { value: p.id, selected: p.id === c.property }, p.label);
+    return h('select', { class: 'filter-prop', title: 'Property', onchange: (e: Event) => onchange((e.target as HTMLSelectElement).value) },
+      groups.flatMap(([label, props]) => (!props.length ? [] : label ? [h('optgroup', { label }, props.map(option))] : props.map(option))),
     );
   };
 
@@ -73,14 +139,14 @@ export function filterEditor(
   const condition = (c: FilterCondition, remove: () => void) => {
     const prop = propOf(c.property);
     return h('div', { class: 'filter-row' },
-      select(withCurrent(props, c.property).map((p) => ({ value: p.id, label: p.label })), c.property, (v) => {
+      propertySelect(c, (v) => {
         c.property = v;
         const next = propOf(v);
         const ops = operatorsFor(next);
         if (!ops.some((o) => o.op === c.op)) c.op = ops[0].op;
         c.value = next?.choices ? next.choices[0] : undefined;
         rerender();
-      }, { class: 'filter-prop', title: 'Property' }),
+      }),
       select(operatorsFor(prop).map((o) => ({ value: o.op, label: o.label })), c.op, (v) => {
         c.op = v as FilterCondition['op'];
         rerender();

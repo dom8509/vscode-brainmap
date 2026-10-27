@@ -1667,3 +1667,30 @@ button:disabled {
     width: 150px;
   }
 }
+
+/* ---------------------------------------------------------------- filter value list */
+.filter-suggest {
+  position: fixed;
+  z-index: 60;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--bm-border);
+  border-radius: 8px;
+  background: var(--bm-surface);
+  box-shadow: 0 12px 32px var(--bm-shadow);
+  font-size: 12px;
+}
+.filter-suggest-item {
+  padding: 4px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 360px;
+  cursor: pointer;
+}
+.filter-suggest-item:hover,
+.filter-suggest-item.active {
+  background: var(--bm-accent-bg);
+  color: var(--bm-accent-fg);
+}

@@ -33,7 +33,10 @@ test('notes become nodes, links connections', () => {
   assert.equal(api.label, 'API');
   assert.equal(api.type, 'service');
   assert.deepEqual(api.tags, ['core']);
-  assert.deepEqual(api.data, { status: 'done', priority: 2 });
+  assert.deepEqual(api.data, {
+    title: 'API', status: 'done', priority: 2, 'depends-on': ['db', 'Missing'],
+    'file.name': 'api', 'file.folder': 'notes', 'file.path': 'notes/api.md',
+  });
   assert.equal(map.nodes[1].label, 'web');
   assert.equal(map.nodes[1].description, 'The web app');
   const edges = map.edges.map((e) => `${e.source} > ${e.target} ${e.type ?? ''}`.trim());
@@ -56,12 +59,17 @@ test('folders, type and label come from the source', () => {
 
 test('data keys filter as data.<key>', () => {
   const map = notesToMap(files, emptyView());
-  assert.deepEqual(dataProperties(map).map((p) => `${p.id}:${p.kind}`), ['data.owners:list', 'data.priority:number', 'data.status:text']);
+  assert.deepEqual(dataProperties(map).map((p) => `${p.id}:${p.kind}`), [
+    'data.depends-on:list', 'data.file.folder:text', 'data.file.name:text', 'data.file.path:text',
+    'data.owners:list', 'data.priority:number', 'data.status:text', 'data.title:text',
+  ]);
   const nodes = (nodeFilter: any) => [...computeSlice(map, { name: 's', nodeFilter }).nodes];
   assert.deepEqual(nodes({ property: 'data.status', op: 'is', value: 'Done' }), ['notes/api.md']);
   assert.deepEqual(nodes({ property: 'data.priority', op: 'ge', value: '2' }), ['notes/api.md']);
   assert.deepEqual(nodes({ property: 'data.owners', op: 'has', value: 'bob' }), ['notes/db.md']);
   assert.deepEqual(nodes({ property: 'id', op: 'startsWith', value: 'other/' }), ['other/outside.md']);
+  assert.deepEqual(nodes({ property: 'data.depends-on', op: 'has', value: 'db' }), ['notes/api.md']);
+  assert.deepEqual(nodes({ property: 'data.file.folder', op: 'is', value: 'other' }), ['other/outside.md']);
 });
 
 test('a view file keeps its source and settings, never nodes', () => {

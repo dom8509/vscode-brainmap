@@ -360,13 +360,14 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
   const kinds = new Map<string, Set<string>>();
   for (const n of map.nodes)
     for (const [k, v] of Object.entries(n.data ?? {})) {
-      if (v === null || v === undefined) continue;
       const set = kinds.get(k) ?? kinds.set(k, new Set()).get(k)!;
+      // An empty value says nothing about the kind.
+      if (v === null || v === undefined || v === '') continue;
       set.add(Array.isArray(v) ? 'list' : typeof v === 'number' ? 'number' : 'text');
     }
   return [...kinds.keys()].sort((a, b) => a.localeCompare(b)).map((k) => {
     const set = kinds.get(k)!;
-    const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : 'text';
+    const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : set.has('list') ? 'list' : 'text';
     return { id: `data.${k}`, label: k, kind };
   });
 }
