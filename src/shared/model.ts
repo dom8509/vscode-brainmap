@@ -62,7 +62,9 @@ export type LayoutName =
   | 'breadthfirst'
   | 'concentric'
   | 'circle'
-  | 'grid';
+  | 'grid'
+  | 'typeColumns'
+  | 'typeRows';
 
 export interface LayoutSettings {
   name: LayoutName;
@@ -132,7 +134,7 @@ export interface BrainMap {
 
 export type FileFormat = 'json' | 'yaml';
 
-const LAYOUT_NAMES: LayoutName[] = ['force', 'fcose', 'hierarchy', 'breadthfirst', 'concentric', 'circle', 'grid'];
+const LAYOUT_NAMES: LayoutName[] = ['force', 'fcose', 'hierarchy', 'breadthfirst', 'concentric', 'circle', 'grid', 'typeColumns', 'typeRows'];
 
 export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   name: 'force',

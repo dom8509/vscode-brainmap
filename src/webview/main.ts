@@ -46,6 +46,8 @@ const LAYOUTS: { value: LayoutName; label: string }[] = [
   { value: 'concentric', label: 'Concentric' },
   { value: 'circle', label: 'Circle' },
   { value: 'grid', label: 'Grid' },
+  { value: 'typeColumns', label: 'Type columns' },
+  { value: 'typeRows', label: 'Type rows' },
 ];
 
 /** Starter graphs offered on an empty canvas. */
@@ -1376,7 +1378,7 @@ class App {
     return h('div', {},
       field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
-      slider(l.name === 'hierarchy' ? 'Level distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
+      slider(l.name === 'hierarchy' ? 'Level distance' : l.name === 'typeColumns' || l.name === 'typeRows' ? 'Lane distance' : 'Edge length', l.edgeLength, 20, 500, (v) => this.setLayout({ edgeLength: v })),
       l.name === 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.live, onchange: (e: Event) => this.setLayout({ live: (e.target as HTMLInputElement).checked }) }),
         'Live physics with cola (neighbours follow while dragging)'),

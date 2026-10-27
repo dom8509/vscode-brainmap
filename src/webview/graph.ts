@@ -13,6 +13,7 @@ import {
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT } from './cards';
+import { laneLayout } from './lanes';
 
 cytoscape.use(cola);
 cytoscape.use(fcose);
@@ -544,6 +545,16 @@ export class GraphView {
       case 'grid':
         options = { name: 'grid', ...anim, avoidOverlapPadding: l.nodeSpacing, sort: grouped ? byType : undefined };
         break;
+      case 'typeColumns':
+      case 'typeRows': {
+        const lanes = laneLayout(
+          visible.nodes().map((n) => ({ id: n.id(), label: String(n.data('label') ?? n.id()), type: n.data('type'), width: n.data('width'), height: CARD_HEIGHT })),
+          visible.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
+          { axis: l.name === 'typeColumns' ? 'columns' : 'rows', nodeSpacing: Math.max(l.nodeSpacing, 10), laneGap: Math.max(l.edgeLength, 60) },
+        );
+        options = { name: 'preset', ...anim, positions: (n: NodeSingular) => lanes[n.id()] ?? n.position() };
+        break;
+      }
     }
 
     const run = () => {

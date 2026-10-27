@@ -81,7 +81,7 @@ The format is kept when saving. New files use the `brainmap.defaultFormat` setti
 title: Example
 settings:
   layout:
-    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid
+    name: hierarchy            # force | fcose | hierarchy | breadthfirst | concentric | circle | grid | typeColumns | typeRows
     hierarchyEdgeTypes: [depends-on]
     direction: TB              # TB | BT | LR | RL
     nodeSpacing: 40
