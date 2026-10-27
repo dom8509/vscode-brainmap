@@ -4,6 +4,7 @@ import {
   FilterCondition,
   FilterGroup,
   FilterNode,
+  FilterProperty,
   FilterScope,
   childrenOf,
   conjunctionOf,
@@ -27,7 +28,11 @@ export function filterEditor(
   value: FilterNode | undefined,
   suggestions: (property: string) => string[],
   onchange: (f: FilterGroup) => void,
+  /** More properties to offer, e.g. the keys of the nodes' data. */
+  extra: FilterProperty[] = [],
 ): HTMLElement {
+  const props = [...propertiesFor(scope), ...extra];
+  const propOf = (id: string) => propertyOf(scope, id, extra);
   const root: FilterGroup = value && isGroup(value) ? value : makeGroup('and', value ? [value] : []);
   const el = h('div', { class: 'filter-editor' });
   const changed = () => onchange(root);
@@ -43,7 +48,7 @@ export function filterEditor(
   };
 
   const valueControl = (c: FilterCondition) => {
-    const prop = propertyOf(scope, c.property);
+    const prop = propOf(c.property);
     const op = operatorsFor(prop).find((o) => o.op === c.op);
     if (!op?.needsValue) return null;
     if (prop?.choices)
@@ -62,12 +67,15 @@ export function filterEditor(
     );
   };
 
+  // A property the list does not offer (a data key no node has any more) stays pickable.
+  const withCurrent = (list: FilterProperty[], id: string) => (list.some((p) => p.id === id) ? list : [...list, propOf(id) ?? { id, label: id, kind: 'text' as const }]);
+
   const condition = (c: FilterCondition, remove: () => void) => {
-    const prop = propertyOf(scope, c.property);
+    const prop = propOf(c.property);
     return h('div', { class: 'filter-row' },
-      select(propertiesFor(scope).map((p) => ({ value: p.id, label: p.label })), c.property, (v) => {
+      select(withCurrent(props, c.property).map((p) => ({ value: p.id, label: p.label })), c.property, (v) => {
         c.property = v;
-        const next = propertyOf(scope, v);
+        const next = propOf(v);
         const ops = operatorsFor(next);
         if (!ops.some((o) => o.op === c.op)) c.op = ops[0].op;
         c.value = next?.choices ? next.choices[0] : undefined;

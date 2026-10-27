@@ -1,0 +1,141 @@
+// A .brainview file: a graph of the Markdown notes of the workspace. It holds no
+// nodes of its own, only where the notes come from and how the graph shows them.
+// The notes come from the Bases extension (see src/bases.ts); here they become
+// nodes and their links become connections. Plain TypeScript for the tests.
+
+import { BrainEdge, BrainMap, BrainNode, normalize } from './model';
+
+/** A file as the Bases extension shares it (BasesFile in vscode-bases/src/host/api.ts). */
+export interface NoteFile {
+  uri: string;
+  /** Workspace-relative path, e.g. "notes/idea.md". */
+  path: string;
+  basename: string;
+  folder: string;
+  kind: 'markdown' | 'yaml';
+  properties: Record<string, unknown>;
+  tags: string[];
+  /** Resolved links: the text's have type "", the link database's their own. */
+  links: { target: string; type: string }[];
+}
+
+/** Which notes a view shows and which of their properties mean what. */
+export interface NoteSource {
+  /** Only notes in these folders (and below). Empty: every note. */
+  folders?: string[];
+  /** The property that gives the type. Default: type. */
+  type?: string;
+  /** The property that gives the name. Default: title, else the file name. */
+  label?: string;
+}
+
+export interface BrainView {
+  title?: string;
+  source: NoteSource;
+  /** The view's own settings: layout, style, slices. */
+  settings: BrainMap['settings'];
+}
+
+export function readView(raw: unknown): BrainView {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
+  const src = obj.source && typeof obj.source === 'object' ? obj.source : {};
+  const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : []);
+  const source: NoteSource = {};
+  const folders = list(src.folders ?? src.folder).map((f) => f.replace(/^\.?\/+|\/+$/g, '')).filter(Boolean);
+  if (folders.length) source.folders = folders;
+  if (typeof src.type === 'string' && src.type) source.type = src.type;
+  if (typeof src.label === 'string' && src.label) source.label = src.label;
+  const map = normalize({ title: obj.title, settings: obj.settings });
+  return { title: typeof obj.title === 'string' ? obj.title : undefined, source, settings: map.settings };
+}
+
+export function emptyView(): BrainView {
+  const map = normalize({});
+  return { title: 'Notes', source: {}, settings: map.settings };
+}
+
+const isNote = (f: NoteFile, folders: string[] | undefined) =>
+  f.kind === 'markdown' && (!folders?.length || folders.some((d) => f.path.startsWith(`${d}/`)));
+
+/** Finds the note a [[link]] in a property names: by path, then by name when only one note has it. */
+function makeResolver(files: NoteFile[]): (raw: string) => string | undefined {
+  const paths = new Set(files.map((f) => f.path));
+  const byName = new Map<string, string | null>();
+  for (const f of files) {
+    const name = f.basename.toLowerCase();
+    byName.set(name, byName.has(name) ? null : f.path);
+  }
+  return (raw) => {
+    const v = raw.replace(/\\/g, '/').replace(/^\.?\//, '').trim();
+    if (paths.has(v)) return v;
+    if (paths.has(`${v}.md`)) return `${v}.md`;
+    return byName.get(v.split('/').pop()!.replace(/\.md$/i, '').toLowerCase()) ?? undefined;
+  };
+}
+
+/** The [[links]] in a property value: "[[a]]" or a list of them. */
+function propertyLinks(value: unknown): string[] {
+  const texts = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  for (const t of texts) {
+    if (typeof t !== 'string') continue;
+    for (const m of t.matchAll(/\[\[([^\]|#\n]+)[^\]\n]*\]\]/g)) out.push(m[1].trim());
+  }
+  return out;
+}
+
+/** A property value as a filter can compare it: text, number or a list of texts. */
+function plain(value: unknown): unknown {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) return value.map((v) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v)));
+  if (typeof value === 'number' || typeof value === 'string') return value;
+  if (typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+/**
+ * The graph of a view: one node per note (its path is its id), one connection per
+ * link between two shown notes. A [[link]] in a property is a connection of that
+ * property's name, e.g. `depends-on: [[api]]`; a link in the text has no type.
+ */
+export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
+  const notes = files.filter((f) => isNote(f, view.source.folders));
+  const shown = new Set(notes.map((n) => n.path));
+  const resolve = makeResolver(files.filter((f) => f.kind === 'markdown'));
+  const typeKey = view.source.type ?? 'type';
+  const labelKey = view.source.label ?? 'title';
+  const used = new Set([typeKey, labelKey, 'tags', 'tag', 'description']);
+
+  const nodes: BrainNode[] = [];
+  const edges: BrainEdge[] = [];
+  const seen = new Set<string>();
+  const connect = (source: string, target: string | undefined, type: string) => {
+    if (!target || target === source || !shown.has(target)) return;
+    const id = `${source} → ${target}${type ? ` · ${type}` : ''}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    edges.push({ id, source, target, type: type || undefined });
+  };
+
+  for (const f of notes) {
+    const p = f.properties ?? {};
+    const text = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
+    const node: BrainNode = { id: f.path, label: text(p[labelKey]) || f.basename };
+    const type = text(p[typeKey]);
+    if (type) node.type = type;
+    if (f.tags.length) node.tags = [...f.tags];
+    const description = text(p.description);
+    if (description) node.description = description;
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (used.has(k)) continue;
+      const links = propertyLinks(v);
+      if (links.length) for (const l of links) connect(f.path, resolve(l), k);
+      else if (plain(v) !== undefined) data[k] = plain(v);
+    }
+    if (Object.keys(data).length) node.data = data;
+    nodes.push(node);
+    for (const l of f.links ?? []) connect(f.path, l.target, l.type);
+  }
+  return { version: 1, title: view.title, settings: view.settings, nodes, edges };
+}

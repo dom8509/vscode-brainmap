@@ -1,0 +1,11 @@
+title: Notes
+source:
+  folders: [examples/notes]
+settings:
+  layout:
+    name: hierarchy
+    hierarchyEdgeTypes: [depends-on]
+  slices:
+    - name: Open work
+      nodeFilter: { property: data.status, op: is, value: open }
+      expand: true

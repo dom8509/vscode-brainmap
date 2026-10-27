@@ -1,6 +1,6 @@
 // Data model of a .brainmap file. Shared by the extension host and the webview.
 
-import { FilterNode, FilterValues, makeGroup, matches, prune, readFilter } from './filter';
+import { FilterNode, FilterProperty, FilterValues, makeGroup, matches, prune, readFilter } from './filter';
 
 export interface Position {
   x: number;
@@ -333,6 +333,7 @@ export function nodeValues(map: BrainMap): (n: BrainNode) => FilterValues {
     if (e.target !== e.source) inc(all, e.target);
   }
   return (n) => ({
+    ...dataValues(n.data),
     name: n.label || n.id,
     id: n.id,
     type: n.type,
@@ -341,6 +342,32 @@ export function nodeValues(map: BrainMap): (n: BrainNode) => FilterValues {
     in: ins.get(n.id) ?? 0,
     out: outs.get(n.id) ?? 0,
     degree: all.get(n.id) ?? 0,
+  });
+}
+
+/** A node's own data as `data.<key>` filter values: lists stay lists, numbers numbers, the rest text. */
+function dataValues(data: Record<string, unknown> | undefined): FilterValues {
+  const out: FilterValues = {};
+  for (const [k, v] of Object.entries(data ?? {})) {
+    if (v === null || v === undefined) continue;
+    out[`data.${k}`] = Array.isArray(v) ? v.map(String) : typeof v === 'number' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+  return out;
+}
+
+/** The data keys of the nodes as filter properties, A to Z; the kind follows the values. */
+export function dataProperties(map: BrainMap): FilterProperty[] {
+  const kinds = new Map<string, Set<string>>();
+  for (const n of map.nodes)
+    for (const [k, v] of Object.entries(n.data ?? {})) {
+      if (v === null || v === undefined) continue;
+      const set = kinds.get(k) ?? kinds.set(k, new Set()).get(k)!;
+      set.add(Array.isArray(v) ? 'list' : typeof v === 'number' ? 'number' : 'text');
+    }
+  return [...kinds.keys()].sort((a, b) => a.localeCompare(b)).map((k) => {
+    const set = kinds.get(k)!;
+    const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : 'text';
+    return { id: `data.${k}`, label: k, kind };
   });
 }
 

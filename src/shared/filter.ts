@@ -26,7 +26,7 @@ export type FilterNode = FilterGroup | FilterCondition;
 
 export type FilterScope = 'node' | 'edge';
 
-type PropertyKind = 'text' | 'list' | 'number' | 'choice';
+export type PropertyKind = 'text' | 'list' | 'number' | 'choice';
 
 export interface FilterProperty {
   id: string;
@@ -80,8 +80,11 @@ export function propertiesFor(scope: FilterScope): FilterProperty[] {
   return scope === 'node' ? NODE_PROPERTIES : EDGE_PROPERTIES;
 }
 
-export function propertyOf(scope: FilterScope, id: string): FilterProperty | undefined {
-  return propertiesFor(scope).find((p) => p.id === id);
+/** A property by id; `data.<key>` is a node's own data, compared as text unless `extra` knows better. */
+export function propertyOf(scope: FilterScope, id: string, extra: FilterProperty[] = []): FilterProperty | undefined {
+  const found = propertiesFor(scope).find((p) => p.id === id) ?? extra.find((p) => p.id === id);
+  if (found || scope !== 'node' || !id.startsWith('data.')) return found;
+  return { id, label: id.slice(5), kind: 'text' };
 }
 
 export function operatorsFor(property: FilterProperty | undefined) {

@@ -60,7 +60,8 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
   [Bases](https://github.com/dom8509/vscode-bases): a filter is a property, an operator and a value.
   Groups combine filters with *All*, *Any* or *None of the following* and can be nested.
   - Nodes: name, id, type, tags, description, incoming, outgoing, connections
-    (e.g. *connections is 0* finds lonely nodes, *incoming ≥ 5* finds hubs).
+    (e.g. *connections is 0* finds lonely nodes, *incoming ≥ 5* finds hubs),
+    and every key of the nodes' `data` (`data.<key>` in the file).
   - Connections: type, tags, label, direction (one-way / two-way).
     Only kept connections are shown and followed from the start nodes.
   - Operators: is, is not, contains, does not contain, starts with, has, does not have,
@@ -72,6 +73,37 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Select several** – `Shift`+drag on the background draws a frame; `Shift`+click adds or removes a node.
 - To see the raw YAML/JSON use VS Code's own *Reopen Editor With… → Text Editor*.
   Changes in either view sync both ways.
+
+## Notes view (.brainview)
+
+A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, the way
+[Bases](https://github.com/dom8509/vscode-bases) shows them as a table. It needs the Bases extension
+(installed with BrainMap): BrainMap reads Bases' index, so the notes are read once and cached once for both.
+
+- **Node** = a note. Its name is the `title` property, else the file name. `type`, `tags` and `description`
+  come from the frontmatter; every other property is there to filter on.
+- **Connection** = a link: `[[note]]`, `![[note]]` or `[text](note.md)` in the text (no type),
+  a `[[note]]` in a property (the property name is the type, e.g. `depends-on: "[[api]]"`),
+  or a row of Bases' link database (with its type).
+- **Read-only.** Double-click a note (or `Enter`) to open it beside the graph and change it there;
+  the graph follows. Layout, style and slices work as in a `.brainmap` and are saved in the `.brainview`.
+- **Filter on any property:** in a slice, properties show up by their name (`status is done`,
+  `priority ≥ 2`, `owners has ann`); in the file they are `data.<name>`.
+- *BrainMap: New Notes View* creates one.
+
+```yaml
+title: Notes
+source:
+  folders: [notes]          # only notes in these folders; leave out for all
+  type: type                # property that gives the type (default: type)
+  label: title              # property that gives the name (default: title, else the file name)
+settings:                   # as in a .brainmap: layout, style, slices
+  slices:
+    - name: Open work
+      nodeFilter: { property: data.status, op: is, value: open }
+```
+
+See `examples/notes.brainview`.
 
 ## File format
 

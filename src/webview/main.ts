@@ -13,6 +13,7 @@ import {
   newId,
   resolveEdgeStyle,
   computeSlice,
+  dataProperties,
   resolveNodeStyle,
   tidySlice,
   uniqueTypes,
@@ -134,6 +135,10 @@ class App {
   map: BrainMap = emptyMap();
   format: FileFormat = 'yaml';
   fileName = '';
+  /** A .brainview: the nodes are notes, so only the view's own settings change here. */
+  readOnly = false;
+  /** The notes as the host sent them, to undo a change that slipped through. */
+  private notes = '';
   selection: string[] = [];
   ui: UiState = vscode.getState<UiState>() ?? {};
   /** The details sidebar on the right. */
@@ -180,8 +185,8 @@ class App {
         Popover.current?.close();
         this.renderSelectionUi();
       },
-      onBackgroundDoubleClick: (pos) => this.addNode(pos),
-      onNodeDoubleClick: (id) => this.editInline(id),
+      onBackgroundDoubleClick: (pos) => !this.readOnly && this.addNode(pos),
+      onNodeDoubleClick: (id) => (this.readOnly ? this.openNote(id) : this.editInline(id)),
       onContextMenu: (target, client, pos) => this.openMenu(target, client, pos),
       onViewport: () => {
         cancelAnimationFrame(this.placeFrame);
@@ -193,10 +198,11 @@ class App {
       },
       onHover: (id) => this.hover(id),
       onDropHover: (source, target) => {
+        if (this.readOnly) return;
         this.dropping = target ? { source, target } : undefined;
         this.renderDropChips();
       },
-      onDropConnect: (source, target) => this.connect(source, target, true, this.dropType ?? this.edgeType),
+      onDropConnect: (source, target) => !this.readOnly && this.connect(source, target, true, this.dropType ?? this.edgeType),
     });
     this.graph.focus = this.ui.focus ?? true;
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
@@ -234,6 +240,11 @@ class App {
     this.map = msg.map;
     this.format = msg.format;
     this.fileName = msg.fileName;
+    if (this.readOnly !== !!msg.readOnly) {
+      this.readOnly = !!msg.readOnly;
+      this.renderEmpty();
+    }
+    this.notes = this.readOnly ? this.notesKey() : '';
     this.graph.follow = this.layout.followSelection;
     this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
@@ -266,6 +277,13 @@ class App {
 
   /** Applies a model change: re-syncs the graph, re-renders UI and persists. */
   private commit(opts: { relayout?: boolean; fit?: boolean; panel?: boolean; popup?: boolean } = {}) {
+    if (this.readOnly && this.notesKey() !== this.notes) {
+      // Notes change in their own files; the view keeps the graph as the host sent it.
+      const sent = JSON.parse(this.notes) as Pick<BrainMap, 'nodes' | 'edges'>;
+      this.map.nodes = sent.nodes;
+      this.map.edges = sent.edges;
+      this.locked();
+    }
     this.graph.follow = this.layout.followSelection;
     this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     this.graph.sync(this.map);
@@ -278,6 +296,21 @@ class App {
     this.renderSelectionUi();
     this.renderOverlays();
     this.save();
+  }
+
+  private notesKey(): string {
+    return JSON.stringify({ nodes: this.map.nodes, edges: this.map.edges });
+  }
+
+  /** True in a .brainview, after saying once where notes are changed. */
+  private locked(): boolean {
+    if (!this.readOnly) return false;
+    post({ type: 'notify', level: 'info', message: 'The notes are read-only here: open a note (double-click) to change it.' });
+    return true;
+  }
+
+  private openNote(id: string) {
+    post({ type: 'open', id });
   }
 
   private structureKey = '';
@@ -328,6 +361,7 @@ class App {
    * `like` is a node whose type and incoming connection type the new one copies (a sibling).
    */
   private addNode(pos: Position, connectFrom?: string, like?: string) {
+    if (this.locked()) return;
     const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel() };
     this.graph.placeAt(node.id, pos);
     const parent = connectFrom ? this.node(connectFrom) : undefined;
@@ -351,6 +385,7 @@ class App {
   }
 
   private applyTemplate(t: (typeof TEMPLATES)[number]) {
+    if (this.locked()) return;
     this.map.nodes = clone(t.nodes);
     this.map.edges = t.edges.map(([source, target, type], i) => ({ id: `e${i + 1}`, source, target, type }));
     this.commit({ relayout: true, fit: true });
@@ -386,6 +421,7 @@ class App {
 
   /** Name editing on the card. Accepts "#tag" and ":type" words as shortcuts. */
   private editInline(id: string, isNew = false) {
+    if (this.readOnly) return this.openNote(id);
     this.cards.editLabel(id, (value, via) => {
       const node = this.node(id);
       if (!node) return;
@@ -412,6 +448,7 @@ class App {
 
   /** Lets the user type the name of another node (with suggestions) and connects to it. */
   private async connectWithPicker(id: string, at: Position) {
+    if (this.locked()) return;
     // Only offer nodes that are not connected to this one yet (in any direction).
     const linked = new Set([id]);
     for (const e of this.map.edges) {
@@ -428,6 +465,7 @@ class App {
   }
 
   private connect(source: string, target: string, directed: boolean, type = this.edgeType) {
+    if (this.locked()) return;
     const e = this.makeEdge(source, target, directed, type);
     this.map.edges.push(e);
     this.commit();
@@ -436,6 +474,7 @@ class App {
 
   /** Asks for confirmation, then deletes the elements and every edge touching a deleted node. */
   async requestDelete(ids: string[]) {
+    if (this.locked()) return;
     const nodes = ids.map((id) => this.node(id)).filter((n): n is BrainNode => !!n);
     const nodeIds = new Set(nodes.map((n) => n.id));
     const edges = this.map.edges.filter((e) => ids.includes(e.id) || nodeIds.has(e.source) || nodeIds.has(e.target));
@@ -514,7 +553,44 @@ class App {
     Popover.current?.close();
     const items: MenuItem[] = [];
     const selNodes = this.selection.filter((s) => this.node(s));
-    if (target.kind === 'node' && target.id && selNodes.length > 2 && selNodes.includes(target.id)) {
+    if (this.readOnly) {
+      if (target.kind === 'node' && target.id) {
+        const id = target.id;
+        items.push(
+          { label: 'Open note', hint: 'Enter', action: () => this.openNote(id) },
+          'separator',
+          { label: 'Focus on this', action: () => {
+            if (!this.graph.focus) this.toggleFocus();
+            this.graph.select([id]);
+          } },
+          { label: 'Select neighbours', action: () => this.graph.select(this.graph.cy.getElementById(id).closedNeighborhood().nodes().map((n) => n.id())) },
+          { label: 'Slice from here', action: () => this.sliceFrom([id]) },
+          ...(selNodes.length > 1 && selNodes.includes(id) ? [{ label: 'Save selection as slice', action: () => this.sliceFrom(selNodes, 'Selection', 'both', 0) }] : []),
+          'separator',
+          { label: 'Copy path', action: () => this.copyText(id) },
+          { label: 'Open details', hint: 'D', action: () => {
+            this.graph.select([id]);
+            this.toggleDetails(true);
+          } },
+        );
+      } else if (target.kind === 'edge' && target.id) {
+        const e = this.edge(target.id);
+        if (!e) return;
+        items.push(
+          { label: 'Open source note', action: () => this.openNote(e.source) },
+          { label: 'Open target note', action: () => this.openNote(e.target) },
+        );
+      } else {
+        items.push(
+          { label: 'Fit view', hint: '⇧F', action: () => this.graph.fit() },
+          { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map) },
+          { label: this.cards.groups ? 'Hide groups' : 'Show groups', hint: 'G', action: () => this.toggleGroups() },
+          { label: this.graph.focus ? 'Focus off' : 'Focus on', hint: 'F', action: () => this.toggleFocus() },
+          'separator',
+          { label: 'Save view as slice', action: () => this.saveViewAsSlice() },
+        );
+      }
+    } else if (target.kind === 'node' && target.id && selNodes.length > 2 && selNodes.includes(target.id)) {
       const nodes = selNodes.map((id) => this.node(id)!);
       items.push(
         { label: `Set type for all ${nodes.length}`, hint: '▸', action: () => this.openTypePopover(at, nodes) },
@@ -598,6 +674,7 @@ class App {
   }
 
   private duplicate(id: string) {
+    if (this.locked()) return;
     const n = this.node(id);
     if (!n) return;
     const copy: BrainNode = { ...clone(n), id: newId('n', this.map.nodes.map((x) => x.id)), label: `${nameOf(n)} copy` };
@@ -661,6 +738,14 @@ class App {
     }
     const nodes = this.selection.filter((id) => this.node(id));
     const one = nodes.length === 1 && this.selection.length === 1 ? nodes[0] : undefined;
+    // In a .brainview the keys that change notes do nothing; F2 and Enter open the note.
+    if (this.readOnly && ['Delete', 'Backspace', 'Tab', 'n', '#', 't', 'c'].includes(e.key)) return;
+    if (this.readOnly && (e.key === 'F2' || e.key === 'Enter')) {
+      if (!one) return;
+      this.openNote(one);
+      e.preventDefault();
+      return;
+    }
     switch (e.key) {
       case 'Delete':
       case 'Backspace':
@@ -798,7 +883,20 @@ class App {
       return b;
     };
     let content: Node[] = [];
-    if (node) {
+    if (this.readOnly) {
+      if (node)
+        content = [
+          barButton(svgIcon(ICON.details, 16), 'Open note', 'Enter', () => this.openNote(node.id)),
+          barButton(icon('slice'), 'Slice from here', undefined, () => this.sliceFrom([node.id])),
+          barButton(icon('more'), 'Details', 'D', () => this.toggleDetails(true)),
+        ];
+      else if (nodes.length > 1)
+        content = [
+          h('span', { class: 'bar-label' }, `${nodes.length} selected`),
+          sep(),
+          barButton(icon('slice'), 'Save as slice', undefined, () => this.sliceFrom(nodes.map((n) => n.id), 'Selection', 'both', 0)),
+        ];
+    } else if (node) {
       content = [
         typeButton(node.type, node.type ? this.nodeTypeColor(node.type) : 'var(--bm-muted)', (b) => this.openTypePopover(below(b), [node], b)),
         sep(),
@@ -869,6 +967,7 @@ class App {
   }
 
   private openTypePopover(at: Point, nodes: BrainNode[], owner?: HTMLElement) {
+    if (this.locked()) return;
     const types = uniqueTypes(this.map).nodeTypes;
     const current = nodes.length === 1 ? nodes[0].type : undefined;
     const pop = new Popover(at, typeList({
@@ -882,6 +981,7 @@ class App {
   }
 
   private openEdgeTypePopover(at: Point, edge: BrainEdge, owner?: HTMLElement) {
+    if (this.locked()) return;
     const pop = new Popover(at, typeList({
       types: uniqueTypes(this.map).edgeTypes, current: edge.type, colorOf: (t) => this.edgeTypeColor(t), listId: 'dl-edge-types',
       onPick: (t) => {
@@ -898,6 +998,7 @@ class App {
 
   /** Tag field with suggestions. With several targets, new tags are added to all of them. */
   private openTagPopover(at: Point, targets: (BrainNode | BrainEdge)[], owner?: HTMLElement) {
+    if (this.locked()) return;
     const single = targets.length === 1 ? targets[0] : undefined;
     new Popover(at, [tagPicker({
       current: single?.tags ?? [],
@@ -911,6 +1012,7 @@ class App {
   }
 
   private openColorPopover(at: Point, node: BrainNode, owner?: HTMLElement) {
+    if (this.locked()) return;
     const pop = new Popover(at, colorSwatches(node.color, (c) => {
       node.color = c;
       pop.close();
@@ -999,7 +1101,9 @@ class App {
     const edge = this.selectedEdge();
     const color = node ? resolveNodeStyle(this.map, node).color : edge ? resolveEdgeStyle(this.map, edge).color : 'var(--bm-accent)';
     const title = node ? nameOf(node) : edge ? 'Connection' : this.selection.length ? `${this.selection.length} selected` : 'Details';
-    const body = node ? this.nodeDetails(node) : edge ? this.edgeDetails(edge) : this.selection.length
+    const body = node ? (this.readOnly ? this.noteDetails(node) : this.nodeDetails(node)) : edge ? (this.readOnly ? this.linkDetails(edge) : this.edgeDetails(edge))
+      : this.readOnly ? [h('p', { class: 'muted' }, this.selection.length ? 'Select one note to see it here.' : 'Select a note. Its properties and links show up here.')]
+      : this.selection.length
       ? [h('div', { class: 'actions' }, h('button', { class: 'btn danger', onclick: () => this.requestDelete(this.selection) }, svgIcon(ICON.trash, 15), ' Delete all…'))]
       : [h('p', { class: 'muted' }, 'Select a node or a connection. Its details show up here: description, id, colors and all connections.')];
     this.panel.replaceChildren(
@@ -1049,7 +1153,6 @@ class App {
 
   private nodeDetails(node: BrainNode): (HTMLElement | false)[] {
     const types = uniqueTypes(this.map);
-    const conns = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
     return [
       field('Name', this.input(node.label, (v) => (node.label = v), { class: 'name-input' })),
       field('Type', this.typePicker(node.type, types.nodeTypes, (t) => this.nodeTypeColor(t), 'dl-node-types', (t) => {
@@ -1073,19 +1176,51 @@ class App {
         onkeydown: (e: KeyboardEvent) => e.key === 'Enter' && (e.target as HTMLInputElement).blur(),
         onchange: (e: Event) => this.renameNodeId(node, (e.target as HTMLInputElement).value),
       })),
-      h('div', { class: 'field' },
-        h('span', {}, `Connections · ${conns.length}`),
-        conns.length
-          ? h('div', { class: 'conns' },
-              conns.map((e) => {
-                const other = e.source === node.id ? e.target : e.source;
-                return h('button', { class: 'conn', onclick: () => this.graph.select([other]) },
-                  h('span', { class: 'conn-arrow' }, e.directed === false ? '↔' : e.source === node.id ? '→' : '←'),
-                  h('span', { class: 'conn-name' }, nameOf(this.node(other))),
-                  e.type && h('span', { class: 'conn-type', style: { color: this.edgeTypeColor(e.type) } }, e.type),
-                );
-              }))
-          : h('span', { class: 'muted small' }, 'None yet. Drag this node onto another one, or press C.'),
+      this.connections(node),
+    ];
+  }
+
+  private connections(node: BrainNode): HTMLElement {
+    const conns = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
+    return h('div', { class: 'field' },
+      h('span', {}, `Connections · ${conns.length}`),
+      conns.length
+        ? h('div', { class: 'conns' },
+            conns.map((e) => {
+              const other = e.source === node.id ? e.target : e.source;
+              return h('button', { class: 'conn', onclick: () => this.graph.select([other]) },
+                h('span', { class: 'conn-arrow' }, e.directed === false ? '↔' : e.source === node.id ? '→' : '←'),
+                h('span', { class: 'conn-name' }, nameOf(this.node(other))),
+                e.type && h('span', { class: 'conn-type', style: { color: this.edgeTypeColor(e.type) } }, e.type),
+              );
+            }))
+        : h('span', { class: 'muted small' }, this.readOnly ? 'None. Link to another note with [[its name]].' : 'None yet. Drag this node onto another one, or press C.'),
+    );
+  }
+
+  /** A note in a .brainview: what its file says, to read; the button opens it. */
+  private noteDetails(node: BrainNode): (HTMLElement | false)[] {
+    const text = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
+    return [
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => this.openNote(node.id) }, svgIcon(ICON.details, 15), ' Open note'),
+      ),
+      field('File', h('span', { class: 'mono small' }, node.id)),
+      !!node.type && field('Type', h('span', {}, node.type)),
+      !!node.tags?.length && field('Tags', h('span', {}, node.tags.map((t) => `#${t}`).join(' '))),
+      !!node.description && field('Description', h('span', {}, node.description)),
+      ...Object.entries(node.data ?? {}).map(([k, v]) => field(k, h('span', {}, text(v)))),
+      this.connections(node),
+    ];
+  }
+
+  private linkDetails(edge: BrainEdge): (HTMLElement | false)[] {
+    const link = (id: string) => h('a', { href: '#', onclick: (e: Event) => { e.preventDefault(); this.graph.select([id]); } }, nameOf(this.node(id)));
+    return [
+      h('div', { class: 'edge-ends' }, link(edge.source), h('span', { class: 'arrow' }, '→'), link(edge.target)),
+      field('Type', h('span', {}, edge.type ?? 'link in the text')),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn', onclick: () => this.openNote(edge.source) }, svgIcon(ICON.details, 15), ' Open source note'),
       ),
     ];
   }
@@ -1123,6 +1258,13 @@ class App {
   // ---------------------------------------------------------------- toolbar, overlays, side panel
 
   private renderEmpty() {
+    if (this.readOnly) {
+      this.empty.replaceChildren(
+        h('div', { class: 'empty-title' }, 'No notes here yet'),
+        h('div', { class: 'empty-hint' }, 'This view shows the Markdown notes of the workspace. Check source.folders in the file, or add a note.'),
+      );
+      return;
+    }
     this.empty.replaceChildren(
       h('div', { class: 'plus-wrap' },
         h('span', { class: 'ring' }),
@@ -1532,8 +1674,11 @@ class App {
       this.showSlice(slice.name);
     };
     const names = this.map.nodes.map((n) => nameOf(n));
+    const dataValues = (key: string) =>
+      [...new Set(this.map.nodes.flatMap((n) => { const v = n.data?.[key]; return v === undefined || v === null ? [] : Array.isArray(v) ? v.map(String) : [String(v)]; }))].sort();
     const nodeSuggestions = (p: string) =>
-      p === 'type' ? types.nodeTypes : p === 'tags' ? types.tags : p === 'name' ? names : p === 'id' ? this.map.nodes.map((n) => n.id) : [];
+      p === 'type' ? types.nodeTypes : p === 'tags' ? types.tags : p === 'name' ? names : p === 'id' ? this.map.nodes.map((n) => n.id)
+        : p.startsWith('data.') ? dataValues(p.slice(5)) : [];
     const edgeSuggestions = (p: string) =>
       p === 'type' ? types.edgeTypes : p === 'tags' ? types.tags : p === 'label' ? [...new Set(this.map.edges.map((e) => e.label ?? '').filter(Boolean))] : [];
     const count = h('p', { class: 'muted small filter-count' });
@@ -1546,7 +1691,7 @@ class App {
       h('h4', {}, s.__orig ? `Edit slice` : 'New slice'),
       field('Name', h('input', { value: s.name, oninput: (e: Event) => (s.name = (e.target as HTMLInputElement).value) })),
       h('h4', {}, 'Nodes'),
-      filterEditor('node', s.nodeFilter, nodeSuggestions, (f) => { s.nodeFilter = f; updateCount(); }),
+      filterEditor('node', s.nodeFilter, nodeSuggestions, (f) => { s.nodeFilter = f; updateCount(); }, dataProperties(this.map)),
       h('h4', {}, 'Connections'),
       filterEditor('edge', s.edgeFilter, edgeSuggestions, (f) => { s.edgeFilter = f; updateCount(); }),
       h('h4', {}, 'Neighbourhood'),
