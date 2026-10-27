@@ -9,6 +9,7 @@ import {
   Position,
   Slice,
   autoColor,
+  cardProperties,
   emptyMap,
   newId,
   resolveEdgeStyle,
@@ -116,6 +117,8 @@ const ICON = {
   back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
   star: '<path d="M12 4l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  open: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   focus: '<circle cx="12" cy="12" r="3"/><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>',
 };
 
@@ -1289,37 +1292,71 @@ class App {
     ];
   }
 
+  /** The node's connections, outgoing first, then incoming; a click selects the other node. */
   private connections(node: BrainNode): HTMLElement {
     const conns = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
-    return h('div', { class: 'field' },
-      h('span', {}, `Connections · ${conns.length}`),
+    const out = conns.filter((e) => e.source === node.id || e.directed === false);
+    const into = conns.filter((e) => !out.includes(e));
+    const row = (e: BrainEdge) => {
+      const other = e.source === node.id ? e.target : e.source;
+      const n = this.node(other);
+      return h('div', { class: 'conn', role: 'button', tabindex: 0, title: 'Select',
+        onclick: () => this.graph.select([other]),
+        onkeydown: (ev: KeyboardEvent) => ev.key === 'Enter' && this.graph.select([other]) },
+        h('span', { class: 'conn-dot', style: { background: n ? resolveNodeStyle(this.map, n).color : 'var(--bm-muted)' } }),
+        h('span', { class: 'conn-name' }, nameOf(n)),
+        e.directed === false && h('span', { class: 'conn-arrow', title: 'Two-way' }, '↔'),
+        e.type && h('span', { class: 'conn-type', style: { color: this.edgeTypeColor(e.type), background: rgba(this.edgeTypeColor(e.type), 0.14) } }, e.type),
+        this.readOnly && h('button', { class: 'conn-open icon-btn', title: 'Open note', 'aria-label': `Open ${nameOf(n)}`,
+          onclick: (ev: Event) => { ev.stopPropagation(); this.openNote(other); } }, svgIcon(ICON.open, 13)),
+      );
+    };
+    const group = (label: string, edges: BrainEdge[]) => edges.length > 0 && h('div', { class: 'conn-group' },
+      h('div', { class: 'conn-head' }, label, h('span', { class: 'count' }, String(edges.length))),
+      h('div', { class: 'conns' }, edges.map(row)));
+    return h('div', { class: 'section' },
+      h('div', { class: 'section-title' }, this.readOnly ? 'Links' : 'Connections', h('span', { class: 'count' }, String(conns.length))),
       conns.length
-        ? h('div', { class: 'conns' },
-            conns.map((e) => {
-              const other = e.source === node.id ? e.target : e.source;
-              return h('button', { class: 'conn', onclick: () => this.graph.select([other]) },
-                h('span', { class: 'conn-arrow' }, e.directed === false ? '↔' : e.source === node.id ? '→' : '←'),
-                h('span', { class: 'conn-name' }, nameOf(this.node(other))),
-                e.type && h('span', { class: 'conn-type', style: { color: this.edgeTypeColor(e.type) } }, e.type),
-              );
-            }))
+        ? [group(this.readOnly ? 'Links to' : 'Outgoing', out), group(this.readOnly ? 'Linked from' : 'Incoming', into)]
         : h('span', { class: 'muted small' }, this.readOnly ? 'None. Link to another note with [[its name]].' : 'None yet. Drag this node onto another one, or press C.'),
     );
   }
 
   /** A note in a .brainview: what its file says, to read; the button opens it. */
   private noteDetails(node: BrainNode): (HTMLElement | false)[] {
-    const text = (v: unknown) => (Array.isArray(v) ? v.join(', ') : String(v));
+    const keys = Object.keys(node.data ?? {}).filter((k) => !k.startsWith('file.'));
+    // A value is a link when it names a note this one connects to by that property, or is a [[link]].
+    const linked = (k: string) => this.map.edges.filter((e) => e.source === node.id && e.type === k).map((e) => this.node(e.target)).filter((n): n is BrainNode => !!n);
+    const value = (k: string) => {
+      const values = cardProperties(node, [k], linked)[0] ?? [];
+      if (!values.length) return h('span', { class: 'muted' }, '—');
+      const raw = node.data?.[k];
+      const list = Array.isArray(raw) || values.length > 1;
+      return h('div', { class: list ? 'prop-list' : 'prop-one' }, values.map((v) =>
+        v.target || v.link
+          ? h('a', { class: 'prop-link', href: '#', title: `Open ${v.link ?? v.text}`,
+            onclick: (e: Event) => { e.preventDefault(); post({ type: 'open', id: v.target ?? '', link: v.link }); } },
+            svgIcon(ICON.link, 11), v.text)
+          : h('span', { class: list ? 'prop-chip' : typeof raw === 'number' ? 'prop-num' : '' }, v.text)));
+    };
+    const folder = node.id.includes('/') ? node.id.slice(0, node.id.lastIndexOf('/') + 1) : '';
+    const typeColor = node.type ? this.nodeTypeColor(node.type) : '';
     return [
       h('div', { class: 'actions' },
-        h('button', { class: 'btn', onclick: () => this.openNote(node.id) }, svgIcon(ICON.details, 15), ' Open note'),
+        h('button', { class: 'btn', onclick: () => this.openNote(node.id) }, svgIcon(ICON.open, 14), ' Open note'),
       ),
-      field('File', h('span', { class: 'mono small' }, node.id)),
-      !!node.type && field('Type', h('span', {}, node.type)),
-      !!node.tags?.length && field('Tags', h('span', {}, node.tags.map((t) => `#${t}`).join(' '))),
-      !!node.description && field('Description', h('span', {}, node.description)),
-      ...Object.entries(node.data ?? {}).filter(([k]) => !k.startsWith('file.')).map(([k, v]) => field(k, h('span', {}, text(v)))),
+      (!!node.type || !!node.tags?.length) && h('div', { class: 'note-meta' },
+        node.type && h('span', { class: 'pill active', style: { borderColor: rgba(typeColor, 0.6), background: rgba(typeColor, 0.16) } },
+          h('span', { class: 'dot', style: { background: typeColor } }), node.type),
+        (node.tags ?? []).map((t) => h('span', { class: 'note-tag' }, `#${t}`)),
+      ),
+      !!node.description && h('p', { class: 'note-desc' }, node.description),
+      keys.length > 0 && h('div', { class: 'section' },
+        h('div', { class: 'section-title' }, 'Properties', h('span', { class: 'count' }, String(keys.length))),
+        h('div', { class: 'props' }, keys.flatMap((k) => [h('span', { class: 'prop-key', title: k }, k), h('div', { class: 'prop-value' }, value(k))])),
+      ),
       this.connections(node),
+      h('div', { class: 'note-file', title: node.id }, h('span', { class: 'muted' }, folder), node.id.slice(folder.length)),
     ];
   }
 
