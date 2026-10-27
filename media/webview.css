@@ -552,6 +552,13 @@ button:disabled {
 .template:hover {
   border-color: var(--bm-accent);
 }
+.gate-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 640px;
+}
 
 /* ---------------------------------------------------------------- bottom bars */
 .floating-bar {

@@ -13,6 +13,9 @@ import {
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
+
+/** From this many shown nodes on, the force layouts give way to a grid. */
+const HUGE_GRAPH = 1500;
 import { laneLayout, laneOf } from './lanes';
 
 cytoscape.use(cola);
@@ -491,12 +494,15 @@ export class GraphView {
     const length = (edge: any) => (edge.hasClass('ghost') ? l.edgeLength * GHOST_LENGTH : lengthOf(edge));
     switch (large ? 'large' : l.name) {
       case 'large':
-        options = {
+        // Past a few thousand nodes even one fCoSE run takes many seconds: a grid, by type, is instant.
+        options = visible.nodes().length >= HUGE_GRAPH ? { name: 'grid', ...anim, animate: false, fit: true, avoidOverlapPadding: l.nodeSpacing, sort: byType } : {
           name: 'fcose',
           ...anim,
           animate: false,
           fit: true,
-          quality: 'draft',
+          // Draft quality is faster but piles notes without links onto one spot.
+          quality: 'default',
+          numIter: 1000,
           randomize: true,
           nodeSeparation: l.nodeSpacing,
           idealEdgeLength: length,

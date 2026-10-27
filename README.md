@@ -89,6 +89,9 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
   the graph follows. Layout, style and slices work as in a `.brainmap` and are saved in the `.brainview`.
 - **Filter on any property:** in a slice, properties show up by their name (`status is done`,
   `priority ≥ 2`, `owners has ann`); in the file they are `data.<name>`.
+- **Large views start with a choice.** From 400 notes on, a view without an active slice shows no graph
+  but its slices, its biggest types and folders (a click makes and shows a slice) and *Show all anyway*.
+  Large graphs are laid out once instead of with live physics; past 1500 nodes as a grid by type.
 - *BrainMap: New Notes View* creates one.
 
 ```yaml

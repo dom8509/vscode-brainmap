@@ -22,7 +22,7 @@ import { describeFilter } from '../shared/filter';
 import { filterEditor } from './filterEditor';
 import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
-import { CardLayer, rgba } from './cards';
+import { CardLayer, LARGE_GRAPH, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
 import { laneAttributes, laneNames } from './lanes';
 import { ContextMenu, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
@@ -139,6 +139,10 @@ class App {
   readOnly = false;
   /** The notes as the host sent them, to undo a change that slipped through. */
   private notes = '';
+  /** The user chose to see every note of a large view, without a slice. */
+  private showAll = false;
+  /** The empty overlay holds the gate's choices, not the empty-graph start. */
+  private gateShown = false;
   selection: string[] = [];
   ui: UiState = vscode.getState<UiState>() ?? {};
   /** The details sidebar on the right. */
@@ -249,7 +253,7 @@ class App {
     this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
     // Render the toolbar first: its height decides the canvas size the layout fits into.
     this.renderToolbar();
-    this.graph.sync(this.map);
+    this.graph.sync(this.shownMap());
     const layoutChanged =
       JSON.stringify(prev.settings.layout) !== JSON.stringify(this.map.settings.layout) ||
       prev.settings.activeSlice !== this.map.settings.activeSlice;
@@ -286,7 +290,7 @@ class App {
     }
     this.graph.follow = this.layout.followSelection;
     this.cards.simplify = this.map.settings.style?.simplifyZoomedOut ?? true;
-    this.graph.sync(this.map);
+    this.graph.sync(this.shownMap());
     this.cards.schedule();
     // New or removed nodes/connections re-run the layout so the graph stays arranged.
     if (this.structureChanged() || opts.relayout) this.graph.runLayout(this.map, { fit: opts.fit ?? false });
@@ -296,6 +300,58 @@ class App {
     this.renderSelectionUi();
     this.renderOverlays();
     this.save();
+  }
+
+  /**
+   * A large notes view without a slice starts empty: thousands of notes at once
+   * are slow to lay out and too dense to read. The user picks a slice first.
+   */
+  private get gated(): boolean {
+    return this.readOnly && !this.showAll && !this.map.settings.activeSlice && this.map.nodes.length >= LARGE_GRAPH;
+  }
+
+  /** What the canvas shows: nothing while the view is gated. */
+  private shownMap(): BrainMap {
+    return this.gated ? { ...this.map, nodes: [], edges: [] } : this.map;
+  }
+
+  /** Shows the slice `name`, made from `make` when there is none of that name yet. */
+  private pickSlice(name: string, make: () => Slice) {
+    const slices = (this.map.settings.slices ??= []);
+    if (!slices.some((s) => s.name === name)) slices.push(make());
+    this.showSlice(name);
+  }
+
+  /** The choices of a gated view: its slices, its biggest types and folders, or everything. */
+  private renderGate() {
+    const top = (keys: (string | undefined)[]) => {
+      const counts = new Map<string, number>();
+      for (const k of keys) if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+      return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8);
+    };
+    const chip = (label: string, count: number | undefined, onclick: () => void) =>
+      h('button', { class: 'template', onclick }, label, count !== undefined && h('span', { class: 'muted' }, ` ${count}`));
+    const row = (title: string, chips: HTMLElement[]) =>
+      chips.length > 0 && h('div', { class: 'gate-row' }, h('span', { class: 'gate-label muted small' }, title), h('div', { class: 'templates' }, chips));
+    const slices = this.map.settings.slices ?? [];
+    const types = top(this.map.nodes.map((n) => n.type));
+    const folders = top(this.map.nodes.map((n) => (n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/')) : undefined)));
+    const parts: (HTMLElement | false)[] = [
+      h('div', { class: 'empty-title' }, `${this.map.nodes.length} notes`),
+      h('div', { class: 'empty-hint' }, 'Too many to show at once. Pick what you want to see:'),
+      row('Slices', slices.map((sl) => chip(sl.name, undefined, () => this.showSlice(sl.name)))),
+      row('Type', types.map(([t, n]) => chip(t, n, () => this.pickSlice(`Type: ${t}`, () => ({ name: `Type: ${t}`, nodeFilter: { property: 'type', op: 'is', value: t } }))))),
+      row('Folder', folders.map(([f, n]) => chip(f, n, () => this.pickSlice(`Folder: ${f}`, () => ({ name: `Folder: ${f}`, nodeFilter: { property: 'id', op: 'startsWith', value: `${f}/` } }))))),
+      h('div', { class: 'templates' },
+        h('button', { class: 'template', onclick: () => this.saveViewAsSlice() }, '+ New slice'),
+        h('button', { class: 'template', onclick: () => {
+          this.showAll = true;
+          this.commit({ relayout: true, fit: true });
+        } }, `Show all ${this.map.nodes.length} anyway`),
+      ),
+    ];
+    this.empty.replaceChildren(...parts.filter((p): p is HTMLElement => !!p));
+    this.gateShown = true;
   }
 
   private notesKey(): string {
@@ -1312,7 +1368,13 @@ class App {
 
   /** Empty state, legend and hint bar. */
   private renderOverlays() {
-    const empty = this.map.nodes.length === 0;
+    const gated = this.gated;
+    if (gated) this.renderGate();
+    else if (this.gateShown) {
+      this.gateShown = false;
+      this.renderEmpty();
+    }
+    const empty = this.map.nodes.length === 0 || gated;
     this.empty.classList.toggle('hidden', !empty);
     this.renderBarToggles();
     this.barToggles.classList.toggle('hidden', empty);
@@ -1483,7 +1545,7 @@ class App {
     // Live preview for color pickers without re-rendering the panel.
     const color = (current: string, apply: (v: string) => void) =>
       h('input', { type: 'color', value: current,
-        oninput: (e: Event) => { apply((e.target as HTMLInputElement).value); this.graph.sync(this.map); },
+        oninput: (e: Event) => { apply((e.target as HTMLInputElement).value); this.graph.sync(this.shownMap()); },
         onchange: () => this.commit({ panel: false }) });
 
     const nodeRows = types.nodeTypes.map((t) => {
