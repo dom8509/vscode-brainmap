@@ -89,7 +89,8 @@ export interface LayoutSettings {
   laneOrders?: Record<string, string[]>;
 }
 
-export type ColorBy = 'type' | 'tag' | 'none';
+/** What colors the nodes: their type, their first tag, a property ('data.<key>') or nothing. */
+export type ColorBy = 'type' | 'tag' | 'none' | `data.${string}`;
 
 export type EdgeLabel = 'label' | 'type' | 'none';
 
@@ -103,6 +104,8 @@ export interface StyleSettings {
   simplifyZoomedOut?: boolean;
   /** Properties (keys of a node's data) whose values show on the card, under the name. */
   cardProperties?: string[];
+  /** Colors for the values of a property, when nodes are colored by it: key → value → color. */
+  valueColors?: Record<string, Record<string, string>>;
   /** Own names for the properties and sections on the cards, by key; left out: the key (a section: its path). */
   cardLabels?: Record<string, string>;
   /** Whether the cards show each property's name before its value. Default: true. */
@@ -302,13 +305,36 @@ export function autoColor(name: string): string {
   return PALETTE[h % PALETTE.length];
 }
 
+/** The value of a property that colors a node: the first one of a list, a [[link]] by its name. */
+export function colorValue(node: BrainNode, key: string): string | undefined {
+  const first = (v: unknown): unknown => (Array.isArray(v) ? v.map(first).find((x) => x !== undefined) : v);
+  const v = first(node.data?.[key]);
+  if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') return undefined;
+  const text = String(v).replace(/^\[\[([^\]|#]+)[^\]]*\]\]$/, '$1').trim();
+  return text || undefined;
+}
+
+/** The values of a property that color the nodes, sorted. */
+export function colorValues(nodes: BrainNode[], key: string): string[] {
+  const values = new Set<string>();
+  for (const n of nodes) {
+    const v = colorValue(n, key);
+    if (v) values.add(v);
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
 export function resolveNodeStyle(map: BrainMap, node: BrainNode): Required<NodeStyle> {
   const style = map.settings.style ?? {};
   const typeStyle = (node.type && style.nodeTypes?.[node.type]) || {};
   const tag = node.tags?.find((t) => style.tags?.[t]) ?? node.tags?.[0];
   const tagStyle = (tag && style.tags?.[tag]) || {};
   let color: string | undefined;
-  if (style.colorBy === 'tag') color = tagStyle.color ?? (tag ? autoColor(tag) : undefined);
+  if (style.colorBy?.startsWith('data.')) {
+    const key = style.colorBy.slice(5);
+    const value = colorValue(node, key);
+    if (value) color = style.valueColors?.[key]?.[value] ?? chipColor(value);
+  } else if (style.colorBy === 'tag') color = tagStyle.color ?? (tag ? autoColor(tag) : undefined);
   else if (style.colorBy === 'type')
     color = typeStyle.color ?? (node.type ? autoColor(node.type) : undefined);
   return {

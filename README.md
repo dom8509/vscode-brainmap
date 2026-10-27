@@ -157,7 +157,9 @@ settings:
     laneOrders:                # lane order per laneBy; unlisted lanes follow by name
       type: [frontend, service, db]
   style:
-    colorBy: type              # type | tag | none
+    colorBy: type              # type | tag | data.<key> (a property) | none
+    valueColors:               # colored by a property: a color per value
+      status: { done: '#3FB950' }
     edgeLabel: label           # what connections show: label | type | none
     simplifyZoomedOut: true    # zoomed far out, nodes become blocks without text
     groupBy: type              # what Groups (G) are made of: type | tag | data.<key>

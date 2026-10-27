@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
-import { cardLabel, cardProperties, chipColor, choiceKeys, computeSlice, dataProperties } from '../src/shared/model';
+import { cardLabel, cardProperties, chipColor, choiceKeys, colorValues, computeSlice, dataProperties, resolveNodeStyle } from '../src/shared/model';
 import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote, viewSections } from '../src/shared/notes';
 import { bodyText, keyLabel, sectionId, sectionPath } from '../src/shared/sections';
 
@@ -212,4 +212,17 @@ test('cards show own names for properties and sections', () => {
   const back = parseView(serializeView(view, 'yaml')).settings.style;
   assert.equal(back?.cardLabels?.[id], 'Scenario');
   assert.equal(back?.cardKeys, false);
+});
+
+test('nodes can be colored by a property', () => {
+  const view = readView({ settings: { style: { colorBy: 'data.status', valueColors: { status: { open: '#123456' } } } } });
+  const files = [note('a.md', { status: 'open' }), note('b.md', { status: ['done', 'x'] }), note('c.md', { status: '[[gone]]' }), note('d.md')];
+  const map = notesToMap(files, view);
+  const color = (id: string) => resolveNodeStyle(map, map.nodes.find((n) => n.id === id)!).color;
+  assert.equal(color('a.md'), '#123456');
+  assert.equal(color('b.md'), chipColor('done'));
+  assert.equal(color('c.md'), chipColor('gone'));
+  assert.equal(color('d.md'), '#6c7a89');
+  assert.deepEqual(colorValues(map.nodes, 'status'), ['done', 'gone', 'open']);
+  assert.equal(parseView(serializeView(view, 'yaml')).settings.style?.colorBy, 'data.status');
 });
