@@ -1292,9 +1292,15 @@ class App {
     ];
   }
 
-  /** The node's connections, outgoing first, then incoming; a click selects the other node. */
+  /** The node's connections the graph shows (in the current slice), outgoing first, then incoming; a click selects the other node. */
   private connections(node: BrainNode): HTMLElement {
-    const conns = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
+    const all = this.map.edges.filter((e) => e.source === node.id || e.target === node.id);
+    const shown = (e: BrainEdge) => {
+      const el = this.graph.cy.getElementById(e.id);
+      return el.nonempty() && !el.hasClass('hidden') && !el.hasClass('dimmed');
+    };
+    const conns = all.filter(shown);
+    const outside = all.length - conns.length;
     const out = conns.filter((e) => e.source === node.id || e.directed === false);
     const into = conns.filter((e) => !out.includes(e));
     const row = (e: BrainEdge) => {
@@ -1318,7 +1324,8 @@ class App {
       h('div', { class: 'section-title' }, this.readOnly ? 'Links' : 'Connections', h('span', { class: 'count' }, String(conns.length))),
       conns.length
         ? [group(this.readOnly ? 'Links to' : 'Outgoing', out), group(this.readOnly ? 'Linked from' : 'Incoming', into)]
-        : h('span', { class: 'muted small' }, this.readOnly ? 'None. Link to another note with [[its name]].' : 'None yet. Drag this node onto another one, or press C.'),
+        : !outside && h('span', { class: 'muted small' }, this.readOnly ? 'None. Link to another note with [[its name]].' : 'None yet. Drag this node onto another one, or press C.'),
+      outside > 0 && h('span', { class: 'muted small' }, `${outside} more outside this slice.`),
     );
   }
 
