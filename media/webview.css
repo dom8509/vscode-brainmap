@@ -1647,6 +1647,32 @@ button:disabled {
 .filter-conj {
   flex: 1;
 }
+.filter-grip {
+  flex: none;
+  width: 12px;
+  color: var(--bm-muted);
+  font-size: 12px;
+  letter-spacing: -3px;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.5;
+}
+.filter-row:hover > .filter-grip, .filter-head:hover > .filter-grip {
+  opacity: 1;
+}
+.filter-row.dragging, .filter-group.dragging {
+  opacity: 0.35;
+}
+/* where a dragged filter lands: a line before or after an item, or the end of a group */
+.filter-row.drop-before, .filter-group.drop-before {
+  box-shadow: 0 -2px 0 var(--bm-accent);
+}
+.filter-row.drop-after, .filter-group.drop-after {
+  box-shadow: 0 2px 0 var(--bm-accent);
+}
+.filter-add.drop-into {
+  box-shadow: 0 -2px 0 var(--bm-accent);
+}
 .filter-prop {
   width: 110px;
   flex: none;

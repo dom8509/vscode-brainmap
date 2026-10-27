@@ -11,7 +11,9 @@ import {
   autoColor,
   cardLabel,
   cardProperties,
+  chipColor,
   choiceKeys,
+  colorValues,
   emptyMap,
   newId,
   resolveEdgeStyle,
@@ -1502,10 +1504,17 @@ class App {
     };
     const slice = this.map.settings.activeSlice;
     const visible = this.graph.cy.nodes().not('.hidden').not('.dimmed').length;
+    // Colored by a property, the legend lists its values instead of the types.
+    const colorBy = this.map.settings.style?.colorBy;
+    const colorKey = colorBy?.startsWith('data.') ? colorBy.slice(5) : undefined;
+    const valueColor = (v: string) => this.map.settings.style?.valueColors?.[colorKey!]?.[v] ?? chipColor(v);
     this.legend.replaceChildren(h('div', { class: 'legend-inner' },
-      usedNodeTypes.length > 0 && h('div', { class: 'legend-row' },
-        usedNodeTypes.map((t) => h('span', { class: 'legend-item' }, h('span', { class: 'dot', style: { background: this.nodeTypeColor(t) } }), t)),
-      ),
+      colorKey
+        ? h('div', { class: 'legend-row' },
+          colorValues(this.map.nodes, colorKey).slice(0, 20).map((v) => h('span', { class: 'legend-item' }, h('span', { class: 'dot', style: { background: valueColor(v) } }), v)))
+        : usedNodeTypes.length > 0 && h('div', { class: 'legend-row' },
+          usedNodeTypes.map((t) => h('span', { class: 'legend-item' }, h('span', { class: 'dot', style: { background: this.nodeTypeColor(t) } }), t)),
+        ),
       usedEdgeTypes.length > 0 && h('div', { class: 'legend-row muted' },
         usedEdgeTypes.map((t) => h('span', { class: 'legend-item' }, lineSample(t), t)),
       ),
@@ -1692,12 +1701,32 @@ class App {
       );
     });
 
+    // Colored by a property: one color per value, the usual ones for states.
+    const colorKey = style.colorBy?.startsWith('data.') ? style.colorBy.slice(5) : undefined;
+    const values = colorKey ? colorValues(this.map.nodes, colorKey) : [];
+    const valueRows = colorKey ? values.slice(0, 40).map((v) => h('div', { class: 'style-row' },
+      color(style.valueColors?.[colorKey]?.[v] ?? chipColor(v), (c) => { ((style.valueColors ??= {})[colorKey] ??= {})[v] = c; }),
+      h('span', { class: 'name' }, v),
+    )) : [];
+    const properties = dataProperties(this.map).map((p) => p.id.slice(5)).filter((k) => sectionArg(k) === undefined);
+    if (colorKey && !properties.includes(colorKey)) properties.push(colorKey);
+
     return h('div', {},
       field('Color nodes by', select(
-        [{ value: 'type', label: 'Node type' }, { value: 'tag', label: 'Node tag (first styled tag)' }, { value: 'none', label: 'Nothing' }],
+        [
+          { value: 'type', label: 'Node type' },
+          { value: 'tag', label: 'Node tag (first styled tag)' },
+          ...properties.map((k) => ({ value: `data.${k}`, label: `Property: ${k}` })),
+          { value: 'none', label: 'Nothing' },
+        ],
         style.colorBy ?? 'type',
-        (v) => { style.colorBy = v as any; this.commit({ panel: false }); },
+        (v) => { style.colorBy = v as any; this.commit(); },
       )),
+      colorKey && h('div', {},
+        h('h4', {}, `Colors by ${colorKey}`),
+        valueRows.length ? valueRows : h('p', { class: 'muted' }, 'No node has a value for it.'),
+        values.length > 40 && h('p', { class: 'muted small' }, `${values.length - 40} more values get their own colors.`),
+      ),
       sliceMode,
       field('Connections show', select(
         [{ value: 'label', label: 'Label' }, { value: 'type', label: 'Type' }, { value: 'none', label: 'Nothing' }],
