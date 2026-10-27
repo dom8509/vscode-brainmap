@@ -13,7 +13,7 @@ import {
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT } from './cards';
-import { laneLayout } from './lanes';
+import { laneLayout, laneOf } from './lanes';
 
 cytoscape.use(cola);
 cytoscape.use(fcose);
@@ -547,10 +547,18 @@ export class GraphView {
         break;
       case 'typeColumns':
       case 'typeRows': {
+        const order = l.laneOrders[l.laneBy];
+        const model = new Map(map.nodes.map((n) => [n.id, n]));
         const lanes = laneLayout(
-          visible.nodes().map((n) => ({ id: n.id(), label: String(n.data('label') ?? n.id()), type: n.data('type'), width: n.data('width'), height: CARD_HEIGHT })),
+          visible.nodes().map((n) => ({
+            id: n.id(),
+            label: String(n.data('label') ?? n.id()),
+            lane: laneOf(model.get(n.id()) ?? { id: n.id() }, l.laneBy, order),
+            width: n.data('width'),
+            height: CARD_HEIGHT,
+          })),
           visible.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
-          { axis: l.name === 'typeColumns' ? 'columns' : 'rows', nodeSpacing: Math.max(l.nodeSpacing, 10), laneGap: Math.max(l.edgeLength, 60) },
+          { axis: l.name === 'typeColumns' ? 'columns' : 'rows', nodeSpacing: Math.max(l.nodeSpacing, 10), laneGap: Math.max(l.edgeLength, 60), order },
         );
         options = { name: 'preset', ...anim, positions: (n: NodeSingular) => lanes[n.id()] ?? n.position() };
         break;

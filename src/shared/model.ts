@@ -82,6 +82,10 @@ export interface LayoutSettings {
   hideOtherEdges?: boolean;
   /** Center the view on the selected element(s). */
   followSelection?: boolean;
+  /** Lane layouts: what puts nodes into lanes: 'type', 'tag' or 'data.<key>'. */
+  laneBy?: string;
+  /** Lane layouts: lane order per laneBy value. Lanes not listed come after, by name. */
+  laneOrders?: Record<string, string[]>;
 }
 
 export type ColorBy = 'type' | 'tag' | 'none';
@@ -146,6 +150,8 @@ export const DEFAULT_LAYOUT: Required<LayoutSettings> = {
   animate: true,
   hideOtherEdges: false,
   followSelection: true,
+  laneBy: 'type',
+  laneOrders: {},
 };
 
 export const PALETTE = [

@@ -88,6 +88,9 @@ settings:
     edgeLength: 120
     live: true                 # force layout (cola) keeps running
     followSelection: true      # center the view on the selected node
+    laneBy: type               # typeColumns/typeRows: type | tag | data.<key>
+    laneOrders:                # lane order per laneBy; unlisted lanes follow by name
+      type: [frontend, service, db]
   style:
     colorBy: type              # type | tag | none
     nodeTypes:

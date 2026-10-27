@@ -1172,6 +1172,29 @@ button:disabled {
 .num {
   width: 64px;
 }
+.lane-order {
+  display: flex;
+  flex-direction: column;
+}
+.lane-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.lane-row .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lane-row .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+.lane-row .icon-btn:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
 .check {
   display: flex;
   align-items: center;

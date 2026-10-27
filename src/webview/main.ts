@@ -23,6 +23,7 @@ import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
+import { laneAttributes, laneNames } from './lanes';
 import { ContextMenu, MenuItem, confirmDialog, pickNode, tagEditor } from './overlays';
 import { Point, Popover, barButton, below, colorSwatches, tagPicker, typeList } from './panels';
 
@@ -46,8 +47,8 @@ const LAYOUTS: { value: LayoutName; label: string }[] = [
   { value: 'concentric', label: 'Concentric' },
   { value: 'circle', label: 'Circle' },
   { value: 'grid', label: 'Grid' },
-  { value: 'typeColumns', label: 'Type columns' },
-  { value: 'typeRows', label: 'Type rows' },
+  { value: 'typeColumns', label: 'Columns' },
+  { value: 'typeRows', label: 'Rows' },
 ];
 
 /** Starter graphs offered on an empty canvas. */
@@ -1227,6 +1228,7 @@ class App {
   private renderToolbar() {
     const types = uniqueTypes(this.map);
     const l = this.layout;
+    const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
     const hierarchyValue = l.hierarchyEdgeTypes.length === 0 ? '' : l.hierarchyEdgeTypes.length === 1 ? l.hierarchyEdgeTypes[0] : '__multi';
     const searchInput = h('input', {
       type: 'search',
@@ -1290,6 +1292,13 @@ class App {
               hierarchyValue,
               (v) => v !== '__multi' && this.setLayout({ hierarchyEdgeTypes: v ? [v] : [] }),
               { class: 'chip-select', title: 'Dependency type that defines the hierarchy' },
+            ),
+          lanes &&
+            select(
+              laneAttributes(this.map.nodes).map((a) => ({ value: a.value, label: `by ${a.label}` })),
+              l.laneBy,
+              (v) => this.setLayout({ laneBy: v }),
+              { class: 'chip-select', title: 'Attribute that puts nodes into columns or rows' },
             ),
           menuBtn('layout', 'Layout'),
         ),
@@ -1375,6 +1384,7 @@ class App {
         out));
     };
     const hierarchical = l.name === 'hierarchy' || l.name === 'breadthfirst';
+    const lanes = l.name === 'typeColumns' || l.name === 'typeRows';
     return h('div', {},
       field('Layout', select(LAYOUTS, l.name, (v) => this.setLayout({ name: v as LayoutName }))),
       slider('Node spacing (proximity)', l.nodeSpacing, 0, 200, (v) => this.setLayout({ nodeSpacing: v })),
@@ -1385,6 +1395,7 @@ class App {
       l.name !== 'force' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: l.animate, onchange: (e: Event) => this.setLayout({ animate: (e.target as HTMLInputElement).checked }) }),
         'Animate transitions'),
+      lanes && this.lanePanel(),
       hierarchical && [
         l.name === 'hierarchy' && field('Direction', select(
           [{ value: 'TB', label: 'Top → bottom' }, { value: 'BT', label: 'Bottom → top' }, { value: 'LR', label: 'Left → right' }, { value: 'RL', label: 'Right → left' }],
@@ -1404,6 +1415,37 @@ class App {
         h('button', { onclick: () => this.graph.fit() }, svgIcon(ICON.fit, 14), 'Fit view ', kbd('⇧F')),
       ),
     );
+  }
+
+  /** Lane layouts: which attribute makes the lanes, and the order of the lanes. */
+  private lanePanel() {
+    const l = this.layout;
+    const names = laneNames(this.map.nodes, l.laneBy, l.laneOrders[l.laneBy]);
+    const move = (i: number, by: number) => {
+      const order = names.filter(Boolean);
+      const [name] = order.splice(i, 1);
+      order.splice(i + by, 0, name);
+      this.setLayout({ laneOrders: { ...l.laneOrders, [l.laneBy]: order } });
+    };
+    const last = names.filter(Boolean).length - 1;
+    return [
+      field(l.name === 'typeColumns' ? 'Columns by' : 'Rows by',
+        select(laneAttributes(this.map.nodes), l.laneBy, (v) => this.setLayout({ laneBy: v }))),
+      h('h4', {}, l.name === 'typeColumns' ? 'Column order (left → right)' : 'Row order (top → bottom)'),
+      h('div', { class: 'lane-order' },
+        names.map((name, i) =>
+          h('div', { class: 'lane-row' },
+            h('span', { class: name ? 'name' : 'name muted' }, name || '(none)'),
+            name && h('button', { class: 'icon-btn', title: 'Move up', disabled: i === 0, onclick: () => move(i, -1) }, '↑'),
+            name && h('button', { class: 'icon-btn', title: 'Move down', disabled: i === last, onclick: () => move(i, 1) }, '↓'),
+          ),
+        ),
+      ),
+      !!l.laneOrders[l.laneBy]?.length && h('button', { onclick: () => {
+        const { [l.laneBy]: _drop, ...rest } = l.laneOrders;
+        this.setLayout({ laneOrders: rest });
+      } }, 'Sort by name'),
+    ];
   }
 
   private sliceFrom(roots: string[], name?: string, direction: Slice['direction'] = 'downstream', depth?: number) {
