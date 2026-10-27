@@ -1,8 +1,16 @@
-import { BrainMap, FileFormat } from './model';
+import { BrainMap, FileFormat, FilterOptions } from './model';
 
 /** Messages sent from the extension host to the webview. */
 export type HostMessage =
-  | { type: 'load'; map: BrainMap; format: FileFormat; fileName: string; readOnly?: boolean }
+  | {
+      type: 'load';
+      map: BrainMap;
+      format: FileFormat;
+      fileName: string;
+      readOnly?: boolean;
+      /** For a map the host filtered already: what the global filter editor offers over every node. */
+      options?: FilterOptions;
+    }
   | { type: 'error'; message: string }
   | { type: 'ui'; bars: BarSettings };
 

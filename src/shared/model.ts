@@ -131,6 +131,8 @@ export interface Slice {
 }
 
 export interface Settings {
+  /** Which nodes are loaded at all; slices and the full graph only see these. */
+  filter?: FilterNode;
   layout?: LayoutSettings;
   style?: StyleSettings;
   slices?: Slice[];
@@ -146,6 +148,8 @@ export interface BrainMap {
   settings: Settings;
   nodes: BrainNode[];
   edges: BrainEdge[];
+  /** The global filter was applied already (by the host, for a .brainview); not saved. */
+  prefiltered?: boolean;
 }
 
 export type FileFormat = 'json' | 'yaml';
@@ -228,6 +232,7 @@ export function normalize(raw: unknown): BrainMap {
       layout,
       style: { colorBy: 'type', ...(settings.style ?? {}) },
       slices: Array.isArray(settings.slices) ? settings.slices.filter((s) => s && s.name).map(readSlice) : [],
+      filter: readFilter(settings.filter),
     },
     nodes,
     edges,
@@ -443,6 +448,47 @@ export function computeSlice(map: BrainMap, raw: Slice): SliceResult {
   );
   const marked = prune(slice.nodeFilter) ? new Set([...matched].filter((id) => nodes.has(id))) : new Set<string>();
   return { nodes, edges, matches: marked };
+}
+
+/**
+ * The map as the global filter leaves it: only the matching nodes and the edges
+ * between them. Connections are counted in the whole map. Unchanged without a filter.
+ */
+export function applyGlobalFilter(map: BrainMap): BrainMap {
+  const filter = prune(map.settings.filter);
+  if (map.prefiltered || !filter) return map;
+  const values = nodeValues(map);
+  const nodes = map.nodes.filter((n) => matches(filter, values(n)));
+  const ids = new Set(nodes.map((n) => n.id));
+  return { ...map, nodes, edges: map.edges.filter((e) => ids.has(e.source) && ids.has(e.target)), prefiltered: true };
+}
+
+/** What a filter editor can offer for a set of nodes: the data keys and the known values per property. */
+export interface FilterOptions {
+  /** How many nodes there are before the global filter. */
+  total: number;
+  properties: FilterProperty[];
+  values: Record<string, string[]>;
+}
+
+export function filterOptions(map: BrainMap, max = 500): FilterOptions {
+  const sets = new Map<string, Set<string>>();
+  const add = (k: string, v: unknown) => {
+    if (v === null || v === undefined || v === '') return;
+    const set = sets.get(k) ?? sets.set(k, new Set()).get(k)!;
+    if (set.size < max) set.add(String(v));
+  };
+  for (const n of map.nodes) {
+    add('type', n.type);
+    n.tags?.forEach((t) => add('tags', t));
+    for (const [k, v] of Object.entries(n.data ?? {})) (Array.isArray(v) ? v : [v]).forEach((x) => add(`data.${k}`, x));
+  }
+  const sort = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  return {
+    total: map.nodes.length,
+    properties: dataProperties(map),
+    values: Object.fromEntries([...sets].map(([k, set]) => [k, [...set].sort(sort)])),
+  };
 }
 
 export function newId(prefix: string, existing: Iterable<string>): string {

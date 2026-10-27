@@ -103,3 +103,25 @@ test('expand: matches plus the nodes connected to them, matches marked', () => {
   assert.deepEqual([...computeSlice(map, { name: 's', nodeFilter: critical, expand: true }).matches], ['web']);
   assert.equal(computeSlice(map, { name: 's' }).matches.size, 0);
 });
+
+test('the global filter loads only matching nodes, connections counted in the whole map', async () => {
+  const { applyGlobalFilter, filterOptions } = await import('../src/shared/model');
+  const full = normalize({ ...map, settings: { filter: { or: [{ property: 'type', op: 'is', value: 'service' }, { property: 'in', op: 'ge', value: '2' }] } } });
+  const loaded = applyGlobalFilter(full);
+  assert.deepEqual(loaded.nodes.map((n) => n.id), ['api', 'auth', 'db']);
+  assert.deepEqual(loaded.edges.map((e) => `${e.source}>${e.target}`), ['api>auth', 'api>db', 'auth>db']);
+  assert.equal(loaded.prefiltered, true);
+  assert.equal(applyGlobalFilter(loaded), loaded);
+  // A slice works on what is loaded.
+  assert.deepEqual([...computeSlice(loaded, { name: 's', nodeFilter: { property: 'tags', op: 'has', value: 'core' } }).nodes].sort(), ['api', 'db']);
+  // Without a filter (or an empty one) nothing changes.
+  assert.equal(applyGlobalFilter(map), map);
+  assert.equal(applyGlobalFilter(normalize({ ...map, settings: { filter: { and: [] } } })).nodes.length, 5);
+  // The file keeps the filter, the flag is not saved.
+  assert.match(serialize(loaded, 'yaml'), /filter:\n {4}or:/);
+  assert.doesNotMatch(serialize(loaded, 'yaml'), /prefiltered/);
+  const opts = filterOptions(full);
+  assert.equal(opts.total, 5);
+  assert.deepEqual(opts.values.type, ['app', 'database', 'note', 'service']);
+  assert.deepEqual(opts.values.tags, ['core', 'critical']);
+});

@@ -91,6 +91,9 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
   (`status is done`, `priority ≥ 2`, `owners has ann`, `depends-on has api`), and so do `file.name`,
   `file.folder` and `file.path`. A click in the value field lists every value the notes have; typing narrows it.
   In the file they are `data.<name>`.
+- **Global filter** (*Slices ▾* → *Global filter*): only the notes that match are loaded at all; slices and
+  the full graph work on those. Notes outside it never reach the graph, so a narrow global filter makes a big
+  view fast. Its value lists know every note, also the ones not loaded. Edit it, then *Apply*.
 - **Large views start with a choice.** From 400 notes on, a view without an active slice shows no graph
   but its slices, its biggest types and folders (a click makes and shows a slice) and *Show all anyway*.
   Large graphs are laid out once instead of with live physics; past 1500 nodes as a grid by type.
@@ -140,6 +143,10 @@ settings:
       critical: { color: '#e15759' }
     edgeTypes:
       depends-on: { color: '#76b7b2', lineStyle: solid, length: 120 }
+  filter:                      # global filter: only matching nodes are loaded (slices see nothing else)
+    property: tags
+    op: hasNot
+    value: archived
   slices:
     - name: Backend
       nodeFilter:              # and | or | not, nested as deep as you like

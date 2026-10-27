@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { BasesApi, bases } from './bases';
 import { detectFormat, parse, parseView, serialize, serializeView } from './shared/format';
 import { notesToMap } from './shared/notes';
-import { FileFormat, emptyMap } from './shared/model';
+import { FileFormat, applyGlobalFilter, emptyMap, filterOptions } from './shared/model';
 import { HostMessage, WebviewMessage } from './shared/messages';
 
 const VIEW_TYPE = 'brainmap.graphEditor';
@@ -133,8 +133,10 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
       try {
         const files = api.files();
         uris = new Map(files.map((f) => [f.path, f.uri]));
-        const map = notesToMap(files, parseView(text));
-        post({ type: 'load', map, format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path), readOnly: true });
+        // Notes outside the global filter never reach the webview.
+        const all = notesToMap(files, parseView(text));
+        const map = applyGlobalFilter(all);
+        post({ type: 'load', map, format: detectFormat(text, defaultFormat), fileName: path.basename(document.uri.path), readOnly: true, options: filterOptions(all) });
       } catch (err) {
         post({ type: 'error', message: `Could not read ${document.fileName}: ${(err as Error).message}` });
       }
@@ -175,12 +177,15 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
           // Only the view's own part goes into the file; the notes stay as they are.
           const text = document.getText();
           const view = parseView(text);
+          const filterChanged = JSON.stringify(view.settings.filter) !== JSON.stringify(msg.map.settings.filter);
           view.title = msg.map.title;
           view.settings = msg.map.settings;
           const next = serializeView(view, detectFormat(text, defaultFormat));
           if (next === text) return;
           lastWritten = next;
           await replaceText(document, next);
+          // Another global filter loads other notes.
+          if (filterChanged) send();
           break;
         }
         case 'open': {

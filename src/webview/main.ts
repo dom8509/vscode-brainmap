@@ -12,13 +12,16 @@ import {
   emptyMap,
   newId,
   resolveEdgeStyle,
+  FilterOptions,
+  applyGlobalFilter,
   computeSlice,
   dataProperties,
+  filterOptions,
   resolveNodeStyle,
   tidySlice,
   uniqueTypes,
 } from '../shared/model';
-import { describeFilter } from '../shared/filter';
+import { FilterNode, describeFilter, prune } from '../shared/filter';
 import { filterEditor } from './filterEditor';
 import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
@@ -139,6 +142,10 @@ class App {
   readOnly = false;
   /** The notes as the host sent them, to undo a change that slipped through. */
   private notes = '';
+  /** From the host, for a .brainview: the global filter editor's choices over every note. */
+  private options?: FilterOptions;
+  /** The global filter being edited, applied only on Apply. */
+  editingFilter?: FilterNode;
   /** The user chose to see every note of a large view, without a slice. */
   private showAll = false;
   /** The empty overlay holds the gate's choices, not the empty-graph start. */
@@ -244,6 +251,7 @@ class App {
     this.map = msg.map;
     this.format = msg.format;
     this.fileName = msg.fileName;
+    this.options = msg.options;
     if (this.readOnly !== !!msg.readOnly) {
       this.readOnly = !!msg.readOnly;
       this.renderEmpty();
@@ -307,12 +315,17 @@ class App {
    * are slow to lay out and too dense to read. The user picks a slice first.
    */
   private get gated(): boolean {
-    return this.readOnly && !this.showAll && !this.map.settings.activeSlice && this.map.nodes.length >= LARGE_GRAPH;
+    return this.readOnly && !this.showAll && !this.map.settings.activeSlice && this.loadedMap().nodes.length >= LARGE_GRAPH;
+  }
+
+  /** The nodes the global filter lets in: all that slices and the full graph ever see. */
+  loadedMap(): BrainMap {
+    return applyGlobalFilter(this.map);
   }
 
   /** What the canvas shows: nothing while the view is gated. */
   private shownMap(): BrainMap {
-    return this.gated ? { ...this.map, nodes: [], edges: [] } : this.map;
+    return this.gated ? { ...this.map, nodes: [], edges: [] } : this.loadedMap();
   }
 
   /** Shows the slice `name`, made from `make` when there is none of that name yet. */
@@ -334,10 +347,11 @@ class App {
     const row = (title: string, chips: HTMLElement[]) =>
       chips.length > 0 && h('div', { class: 'gate-row' }, h('span', { class: 'gate-label muted small' }, title), h('div', { class: 'templates' }, chips));
     const slices = this.map.settings.slices ?? [];
-    const types = top(this.map.nodes.map((n) => n.type));
-    const folders = top(this.map.nodes.map((n) => (n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/')) : undefined)));
+    const nodes = this.loadedMap().nodes;
+    const types = top(nodes.map((n) => n.type));
+    const folders = top(nodes.map((n) => (n.id.includes('/') ? n.id.slice(0, n.id.lastIndexOf('/')) : undefined)));
     const parts: (HTMLElement | false)[] = [
-      h('div', { class: 'empty-title' }, `${this.map.nodes.length} notes`),
+      h('div', { class: 'empty-title' }, `${nodes.length} notes`),
       h('div', { class: 'empty-hint' }, 'Too many to show at once. Pick what you want to see:'),
       row('Slices', slices.map((sl) => chip(sl.name, undefined, () => this.showSlice(sl.name)))),
       row('Type', types.map(([t, n]) => chip(t, n, () => this.pickSlice(`Type: ${t}`, () => ({ name: `Type: ${t}`, nodeFilter: { property: 'type', op: 'is', value: t } }))))),
@@ -345,9 +359,13 @@ class App {
       h('div', { class: 'templates' },
         h('button', { class: 'template', onclick: () => this.saveViewAsSlice() }, '+ New slice'),
         h('button', { class: 'template', onclick: () => {
+          this.editingFilter = clone(this.map.settings.filter ?? { and: [] });
+          this.openSettings('slices');
+        } }, this.map.settings.filter ? 'Global filter…' : '+ Global filter'),
+        h('button', { class: 'template', onclick: () => {
           this.showAll = true;
           this.commit({ relayout: true, fit: true });
-        } }, `Show all ${this.map.nodes.length} anyway`),
+        } }, `Show all ${nodes.length} anyway`),
       ),
     ];
     this.empty.replaceChildren(...parts.filter((p): p is HTMLElement => !!p));
@@ -577,7 +595,8 @@ class App {
   private sliceCount(): string {
     const slice = this.map.settings.slices?.find((s) => s.name === this.map.settings.activeSlice);
     if (!slice) return '';
-    return ` · ${computeSlice(this.map, slice).nodes.size}/${this.map.nodes.length}`;
+    const loaded = this.loadedMap();
+    return ` · ${computeSlice(loaded, slice).nodes.size}/${loaded.nodes.length}`;
   }
 
   private showSlice(name: string | undefined) {
@@ -1710,6 +1729,7 @@ class App {
       ),
     );
     return h('div', {},
+      this.globalFilterPanel(),
       field('Nodes outside the slice', select(
         [{ value: 'hide', label: 'Hide' }, { value: 'dim', label: 'Dim' }],
         this.map.settings.sliceMode ?? 'hide',
@@ -1718,6 +1738,51 @@ class App {
       this.editingSlice
         ? this.sliceEditor(this.editingSlice)
         : h('button', { onclick: () => { this.editingSlice = { name: newId('Slice ', slices.map((s) => s.name)) }; this.renderSettings(); } }, '+ New slice'),
+    );
+  }
+
+  /** The global filter: which nodes are loaded at all. Edited on a copy, applied with Apply. */
+  private globalFilterPanel(): HTMLElement {
+    const filter = prune(this.map.settings.filter);
+    const total = this.options?.total ?? this.map.nodes.length;
+    const loaded = this.loadedMap().nodes.length;
+    const what = this.readOnly ? 'notes' : 'nodes';
+    const summary = filter
+      ? `Loads ${loaded} of ${total} ${what}: ${describeFilter(filter, 'node')}`
+      : `Loads all ${total} ${what}. Set a filter to load only some: slices and the full graph then see nothing else.`;
+    const draft = this.editingFilter;
+    if (!draft)
+      return h('div', { class: 'global-filter' },
+        h('h4', {}, 'Global filter'),
+        h('p', { class: 'muted small' }, summary),
+        h('button', { onclick: () => { this.editingFilter = clone(this.map.settings.filter ?? { and: [] }); this.renderSettings(); } },
+          filter ? 'Edit global filter' : '+ Global filter'),
+      );
+    // A .brainview has only the loaded notes here: the host knows the others' values.
+    const opts = this.options ?? filterOptions(this.map);
+    const suggestions = (p: string) => opts.values[p] ?? [];
+    const count = h('p', { class: 'muted small filter-count' });
+    const updateCount = () => {
+      count.textContent = this.readOnly
+        ? 'Apply to load the matching notes.'
+        : `Would load ${applyGlobalFilter({ ...this.map, settings: { ...this.map.settings, filter: this.editingFilter } }).nodes.length} of ${total} nodes`;
+    };
+    updateCount();
+    const apply = (next: FilterNode | undefined) => {
+      this.map.settings.filter = prune(next);
+      this.editingFilter = undefined;
+      this.commit({ relayout: true, fit: true });
+    };
+    return h('div', { class: 'global-filter slice-editor' },
+      h('h4', {}, 'Global filter'),
+      h('p', { class: 'muted small' }, `Only ${what} that match are loaded, for every slice and the full graph.`),
+      filterEditor('node', draft, suggestions, (f) => { this.editingFilter = f; updateCount(); }, opts.properties),
+      count,
+      h('div', { class: 'row' },
+        h('button', { class: 'primary', onclick: () => apply(this.editingFilter) }, 'Apply'),
+        h('button', { onclick: () => { this.editingFilter = undefined; this.renderSettings(); } }, 'Cancel'),
+        filter && h('button', { onclick: () => apply(undefined) }, 'Remove'),
+      ),
     );
   }
 
@@ -1747,8 +1812,9 @@ class App {
       p === 'type' ? types.edgeTypes : p === 'tags' ? types.tags : p === 'label' ? [...new Set(this.map.edges.map((e) => e.label ?? '').filter(Boolean))] : [];
     const count = h('p', { class: 'muted small filter-count' });
     const updateCount = () => {
-      const res = computeSlice(this.map, s);
-      count.textContent = `Matches ${res.nodes.size} of ${this.map.nodes.length} nodes · ${res.edges.size} of ${this.map.edges.length} connections`;
+      const loaded = this.loadedMap();
+      const res = computeSlice(loaded, s);
+      count.textContent = `Matches ${res.nodes.size} of ${loaded.nodes.length} nodes · ${res.edges.size} of ${loaded.edges.length} connections`;
     };
     updateCount();
     return h('div', { class: 'slice-editor' },
