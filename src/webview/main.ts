@@ -579,7 +579,7 @@ class App {
       items.push(
         { label: 'Add node here', hint: 'dbl-click', action: () => this.addNode(pos) },
         'separator',
-        { label: 'Fit view', hint: '⇧F', action: () => this.graph.fit() },
+        { label: 'Fit view', hint: 'Enter', action: () => this.graph.fit() },
         { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map) },
         { label: this.cards.groups ? 'Hide groups' : 'Show groups', hint: 'G', action: () => this.toggleGroups() },
         { label: this.graph.focus ? 'Focus off' : 'Focus on', hint: 'F', action: () => this.toggleFocus() },
@@ -627,6 +627,11 @@ class App {
     this.commit({ popup: true });
   }
 
+  private centerView() {
+    if (this.selection.length) this.graph.centerOn(this.selection);
+    else this.graph.fit();
+  }
+
   private onKey(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
@@ -666,7 +671,9 @@ class App {
         else return;
         break;
       case 'Enter':
-        if (one) this.addSibling(one);
+        // Shift+Enter, or Enter with nothing selected, centers the view (on the selection, if any).
+        if (e.shiftKey || (!this.selection.length && this.map.nodes.length)) this.centerView();
+        else if (one) this.addSibling(one);
         else if (!this.map.nodes.length) this.createFirstNode();
         else return;
         break;
@@ -1133,7 +1140,9 @@ class App {
   private renderHints() {
     const item = (k: string, label: string) => h('span', {}, kbd(k), ' ', label);
     this.hints.replaceChildren(
-      item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F', 'focus'), item('⌫', 'delete'),
+      item('Tab', 'child'), item('Enter', 'sibling'), item('C', 'connect'), item('F2', 'rename'), item('#', 'tag'), item('T', 'type'),
+      item('⌫', 'delete'), item('F', 'focus'), item('G', 'groups'), item('L', 'layout'), item('D', 'details'),
+      item('⇧Enter', 'center'), item('Ctrl K', 'search'), item('Esc', 'deselect'),
       h('span', {}, 'drag onto a node to connect · right-click for more'),
     );
   }

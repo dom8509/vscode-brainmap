@@ -619,21 +619,25 @@ button:disabled {
   flex-shrink: 0;
 }
 .hints {
+  /* At the top: the bottom corners hold the bar toggles and the minimap. */
+  top: 14px;
+  bottom: auto;
   left: 50%;
   transform: translateX(-50%);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(820px, calc(100% - 28px));
   display: flex;
-  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
   align-items: center;
   padding: 7px 14px;
-  border-radius: 20px;
   color: var(--bm-muted);
   font-size: 12px;
-  white-space: nowrap;
 }
-@container (max-width: 1150px) {
-  .hints {
-    display: none;
-  }
+.hints > span {
+  white-space: nowrap;
 }
 .minimap {
   position: absolute;
