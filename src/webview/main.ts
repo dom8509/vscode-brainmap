@@ -399,8 +399,14 @@ class App {
 
   /** Lets the user type the name of another node (with suggestions) and connects to it. */
   private async connectWithPicker(id: string, at: Position) {
+    // Only offer nodes that are not connected to this one yet (in any direction).
+    const linked = new Set([id]);
+    for (const e of this.map.edges) {
+      if (e.source === id) linked.add(e.target);
+      if (e.target === id) linked.add(e.source);
+    }
     const options = this.map.nodes
-      .filter((n) => n.id !== id)
+      .filter((n) => !linked.has(n.id))
       .map((n) => ({ id: n.id, label: nameOf(n), detail: [n.type, n.label && n.label !== n.id ? n.id : ''].filter(Boolean).join(' · ') }));
     const picked = await pickNode(at, nameOf(this.node(id)), options);
     if (!picked) return;
