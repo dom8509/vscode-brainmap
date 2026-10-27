@@ -99,3 +99,19 @@ test('positions are not kept and the old manual layout falls back to force', () 
   assert.equal('position' in m.nodes[0], false);
   assert.ok(!serialize(m, 'yaml').includes('position'));
 });
+
+test('slices hide orphans or show only them', () => {
+  const map = normalize({
+    nodes: [{ id: 'a', type: 'x' }, { id: 'b', type: 'x' }, { id: 'c', type: 'y' }, { id: 'd', type: 'x' }],
+    edges: [{ id: 'e1', source: 'a', target: 'b', type: 'uses' }, { id: 'e2', source: 'a', target: 'c', type: 'owns' }],
+  });
+  const ids = (s: object) => [...computeSlice(map, { name: 's', ...s }).nodes].sort();
+  assert.deepEqual(ids({ orphans: 'hide' }), ['a', 'b', 'c']);
+  assert.deepEqual(ids({ orphans: 'only' }), ['d']);
+  assert.equal(computeSlice(map, { name: 's', orphans: 'only' }).edges.size, 0);
+  // Orphans count in the slice: without type y, nothing is left to c; with only uses kept, c has no connection.
+  assert.deepEqual(ids({ orphans: 'only', edgeFilter: { property: 'type', op: 'is', value: 'uses' } }), ['c', 'd']);
+  assert.deepEqual(ids({ orphans: 'hide', nodeFilter: { property: 'type', op: 'is', value: 'x' } }), ['a', 'b']);
+  // An unknown value does nothing.
+  assert.deepEqual(ids({ orphans: 'maybe' }), ['a', 'b', 'c', 'd']);
+});

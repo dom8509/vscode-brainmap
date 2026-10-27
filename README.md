@@ -69,6 +69,8 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
     Only kept connections are shown and followed from the start nodes.
   - Operators: is, is not, contains, does not contain, starts with, has, does not have,
     is empty, is not empty, >, ≥, <, ≤. Text compares ignore case.
+  - *Nodes without connections* (orphans): *Show*, *Hide* or *Show only these*. A node counts as an orphan when
+    none of the slice's connections touch it (`orphans: hide | only` in the file).
   - A filter without its value does not filter yet. The editor counts the matches as you type;
     the *Slices* button shows how many nodes the active slice keeps (`6/10`).
 - **Keys** – `Tab` child · `Enter` sibling · `C` connect · `#` tag · `T` type · `D` details · `F` focus · `G` groups ·
@@ -174,6 +176,7 @@ settings:
       nodeFilter: { property: tags, op: has, value: critical }
       expand: true             # also show nodes connected to the matches (direction, depth)
       highlight: true          # mark the nodes that match the filter
+      orphans: hide            # nodes without connections: hide | only (leave out to show them)
       direction: downstream
     # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend

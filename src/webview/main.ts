@@ -1903,6 +1903,12 @@ class App {
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: !!s.expand, onchange: (e: Event) => { s.expand = (e.target as HTMLInputElement).checked || undefined; updateCount(); } }),
         'Also show nodes connected to the matching nodes'),
+      field('Nodes without connections', select(
+        [{ value: '', label: 'Show' }, { value: 'hide', label: 'Hide' }, { value: 'only', label: 'Show only these' }],
+        s.orphans ?? '',
+        (v) => { s.orphans = (v || undefined) as Slice['orphans']; updateCount(); },
+        { title: 'Orphans: nodes that none of the kept connections touch' },
+      )),
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: !!s.highlight, onchange: (e: Event) => { s.highlight = (e.target as HTMLInputElement).checked || undefined; } }),
         'Highlight the matching nodes'),
@@ -1932,6 +1938,7 @@ function describeSlice(s: Slice): string {
   if (edges) parts.push(`connections: ${edges}`);
   if (s.roots?.length) parts.push(`from ${s.roots.join(', ')} ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
   if (s.expand) parts.push(`+ connected ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
+  if (s.orphans) parts.push(s.orphans === 'hide' ? 'without orphans' : 'only orphans');
   return parts.join(' · ') || 'everything';
 }
 
