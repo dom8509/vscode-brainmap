@@ -178,7 +178,7 @@ export class CardLayer {
     const d = n.data();
     const rows: CardRow[] = d.props ?? [];
     // Tags stay off the card to keep it calm; the hover card and details show them.
-    const sig = [d.label, d.type, d.typeName, JSON.stringify(rows), d.color, d.width].join('|');
+    const sig = [d.label, d.type, d.typeName, JSON.stringify(rows), d.keys, d.color, d.width].join('|');
     if (sig === card.sig || this.editing === n.id()) return;
     card.sig = sig;
     const color: string = d.color;
@@ -199,15 +199,15 @@ export class CardLayer {
           d.typeName && h('span', { class: 'card-meta' }, h('span', { class: 'card-type' }, d.typeName)),
         ),
       ),
-      ...(rows.length ? [h('div', { class: 'card-rows' }, rows.flatMap((r) => [
-        h('span', { class: 'card-key', title: r.label }, r.label),
-        this.values(r.values),
-      ]))] : []),
+      // Without names each value takes the whole line; its name is still the tooltip.
+      ...(rows.length ? [h('div', { class: d.keys === false ? 'card-rows no-keys' : 'card-rows' }, rows.flatMap((r) => d.keys === false
+        ? [this.values(r.values, r.label)]
+        : [h('span', { class: 'card-key', title: r.label }, r.label), this.values(r.values)]))] : []),
     );
   }
 
   /** The values of one line: chips for states, links that open their note, else text. */
-  private values(values: CardValue[]): HTMLElement {
+  private values(values: CardValue[], title?: string): HTMLElement {
     const parts: (string | HTMLElement)[] = [];
     values.forEach((v, j) => {
       if (v.color) return parts.push(h('span', { class: 'card-chip', style: { color: v.color, background: rgba(v.color, 0.16) } }, v.text));
@@ -225,7 +225,7 @@ export class CardLayer {
         },
       }, v.text));
     });
-    return h('span', { class: 'card-value' }, ...parts);
+    return h('span', { class: 'card-value', title }, ...parts);
   }
 
   /** Turns the card's name into a text field. `done` gets the text and the key that ended editing. */

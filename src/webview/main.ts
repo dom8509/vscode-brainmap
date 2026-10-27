@@ -9,6 +9,7 @@ import {
   Position,
   Slice,
   autoColor,
+  cardLabel,
   cardProperties,
   choiceKeys,
   emptyMap,
@@ -1371,7 +1372,7 @@ class App {
       !!node.description && h('p', { class: 'note-desc' }, node.description),
       keys.length > 0 && h('div', { class: 'section' },
         h('div', { class: 'section-title' }, 'Properties', h('span', { class: 'count' }, String(keys.length))),
-        h('div', { class: 'props' }, keys.flatMap((k) => [h('span', { class: 'prop-key', title: sectionArg(k) ?? k }, keyLabel(k)), h('div', { class: 'prop-value' }, value(k))])),
+        h('div', { class: 'props' }, keys.flatMap((k) => [h('span', { class: 'prop-key', title: sectionArg(k) ?? k }, cardLabel(k, this.map.settings.style?.cardLabels)), h('div', { class: 'prop-value' }, value(k))])),
       ),
       this.connections(node),
       h('div', { class: 'note-file', title: node.id }, h('span', { class: 'muted' }, folder), node.id.slice(folder.length)),
@@ -1730,7 +1731,43 @@ class App {
     if (!all.length && !chosen.length && !this.readOnly) return false;
     const set = (next: string[]) => {
       style.cardProperties = next.length ? next : undefined;
+      // A removed property forgets its own name.
+      if (style.cardLabels) {
+        for (const k of Object.keys(style.cardLabels)) if (!next.includes(k)) delete style.cardLabels[k];
+        if (!Object.keys(style.cardLabels).length) style.cardLabels = undefined;
+      }
       this.commit();
+    };
+    const rename = (key: string, name: string) => {
+      const labels = { ...style.cardLabels };
+      if (name.trim() && name.trim() !== keyLabel(key)) labels[key] = name.trim();
+      else delete labels[key];
+      style.cardLabels = Object.keys(labels).length ? labels : undefined;
+      this.commit();
+    };
+    // A click on a chip's name turns it into a field: Enter keeps the new name, empty goes back to the key.
+    const chip = (key: string) => {
+      const name = cardLabel(key, style.cardLabels);
+      const el = h('span', { class: 'chip', title: sectionArg(key) ?? key });
+      const edit = () => {
+        let cancel = false;
+        const input = h('input', { class: 'chip-input', value: style.cardLabels?.[key] ?? '', placeholder: keyLabel(key), 'aria-label': `Name for ${keyLabel(key)}`,
+          onkeydown: (e: KeyboardEvent) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') cancel = true;
+            if (e.key === 'Enter' || e.key === 'Escape') input.blur();
+          },
+          // Leaving the field keeps the name, Escape does not.
+          onblur: () => (cancel ? this.renderSettings() : rename(key, input.value)) });
+        el.replaceChildren(input);
+        input.focus();
+        input.select();
+      };
+      el.append(
+        h('button', { class: 'chip-name', title: 'Click to rename', onclick: edit }, name),
+        h('button', { class: 'chip-x', title: `Remove ${name}`, 'aria-label': `Remove ${name}`, onclick: () => set(chosen.filter((x) => x !== key)) }, '×'),
+      );
+      return el;
     };
     const rest = all.filter((p) => !chosen.includes(p));
     // A part of the note's text, as Bases' "Add section": headings, then maybe a code block.
@@ -1764,10 +1801,13 @@ class App {
       h('h4', {}, 'Properties on cards'),
       h('div', { class: 'link-props' },
         chosen.length
-          ? chosen.map((p) => h('span', { class: 'chip', title: sectionArg(p) ?? p }, keyLabel(p),
-            h('button', { class: 'chip-x', title: `Remove ${keyLabel(p)}`, 'aria-label': `Remove ${keyLabel(p)}`, onclick: () => set(chosen.filter((x) => x !== p)) }, '×')))
+          ? chosen.map(chip)
           : h('span', { class: 'muted small' }, 'None: cards show the name and type.'),
       ),
+      chosen.length > 0 && h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: style.cardKeys ?? true,
+          onchange: (e: Event) => { style.cardKeys = (e.target as HTMLInputElement).checked ? undefined : false; this.commit({ panel: false }); } }),
+        'Show property names on cards'),
       rest.length > 0 && select(
         [{ value: '', label: '+ Add property…' }, ...rest.map((p) => ({ value: p }))],
         '',

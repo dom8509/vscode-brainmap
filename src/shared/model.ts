@@ -103,6 +103,10 @@ export interface StyleSettings {
   simplifyZoomedOut?: boolean;
   /** Properties (keys of a node's data) whose values show on the card, under the name. */
   cardProperties?: string[];
+  /** Own names for the properties and sections on the cards, by key; left out: the key (a section: its path). */
+  cardLabels?: Record<string, string>;
+  /** Whether the cards show each property's name before its value. Default: true. */
+  cardKeys?: boolean;
   nodeTypes?: Record<string, NodeStyle>;
   edgeTypes?: Record<string, EdgeStyle>;
   tags?: Record<string, NodeStyle>;
@@ -448,12 +452,17 @@ export function choiceKeys(nodes: BrainNode[], keys: string[] | undefined): Set<
   return out;
 }
 
+/** The name a property or section shows under: its own name, else the key (a section: its path). */
+export function cardLabel(key: string, labels?: Record<string, string>): string {
+  return labels?.[key]?.trim() || keyLabel(key);
+}
+
 /**
  * The lines of a card: one per chosen property that has a value. `linked(key)` gives
  * the nodes the node connects to by that property: a value naming one of them becomes
  * a link to it. The values of a key in `choices` become colored chips.
  */
-export function cardProperties(node: BrainNode, keys: string[] | undefined, linked: (key: string) => BrainNode[] = () => [], choices?: Set<string>): CardRow[] {
+export function cardProperties(node: BrainNode, keys: string[] | undefined, linked: (key: string) => BrainNode[] = () => [], choices?: Set<string>, labels?: Record<string, string>): CardRow[] {
   const text = (v: unknown) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).trim();
   const values = (k: string): CardValue[] => {
     const v = node.data?.[k];
@@ -479,7 +488,7 @@ export function cardProperties(node: BrainNode, keys: string[] | undefined, link
       });
     });
   };
-  return (keys ?? []).map((key) => ({ key, label: keyLabel(key), values: values(key) })).filter((r) => r.values.length > 0);
+  return (keys ?? []).map((key) => ({ key, label: cardLabel(key, labels), values: values(key) })).filter((r) => r.values.length > 0);
 }
 
 export function edgeValues(e: BrainEdge): FilterValues {
