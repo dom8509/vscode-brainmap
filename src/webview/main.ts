@@ -323,15 +323,22 @@ class App {
     return `Node ${i}`;
   }
 
-  /** Creates a node, selects it and lets the user type its name right on the card. */
-  private addNode(pos: Position, connectFrom?: string) {
+  /**
+   * Creates a node, selects it and lets the user type its name right on the card.
+   * `like` is a node whose type and incoming connection type the new one copies (a sibling).
+   */
+  private addNode(pos: Position, connectFrom?: string, like?: string) {
     const node: BrainNode = { id: newId('n', this.map.nodes.map((n) => n.id)), label: this.nextLabel() };
     this.graph.placeAt(node.id, pos);
     const parent = connectFrom ? this.node(connectFrom) : undefined;
+    const model = like ? this.node(like) : undefined;
     // A connected node inherits the type of its parent – usually what you want in a mind map.
-    if (parent?.type) node.type = parent.type;
+    // A sibling is more like its sibling than like their parent.
+    const type = model ? model.type : parent?.type;
+    if (type) node.type = type;
     this.map.nodes.push(node);
-    if (parent) this.map.edges.push(this.makeEdge(parent.id, node.id));
+    const edgeType = like ? this.map.edges.find((e) => e.source === connectFrom && e.target === like)?.type : undefined;
+    if (parent) this.map.edges.push(this.makeEdge(parent.id, node.id, true, like ? edgeType ?? '' : this.edgeType));
     this.commit();
     this.graph.select([node.id]);
     this.editInline(node.id, true);
@@ -350,7 +357,7 @@ class App {
   }
 
   /** Adds a node next to `parentId`, in the direction with the most free space. */
-  addChild(parentId: string) {
+  addChild(parentId: string, like?: string) {
     const p = this.graph.cy.getElementById(parentId).position();
     const dist = this.layout.edgeLength + 80;
     const others = this.graph.cy.nodes().not('.hidden').map((n) => (n as any).position() as Position);
@@ -366,15 +373,15 @@ class App {
         best = c;
       }
     }
-    this.addNode(best, parentId);
+    this.addNode(best, parentId, like);
   }
 
   /** A new node next to `id` that hangs off the same parent. */
   addSibling(id: string) {
     const parent = this.map.edges.find((e) => e.target === id)?.source;
-    if (parent) return this.addChild(parent);
+    if (parent) return this.addChild(parent, id);
     const p = this.graph.cy.getElementById(id).position();
-    this.addNode({ x: p.x + 240, y: p.y });
+    this.addNode({ x: p.x + 240, y: p.y }, undefined, id);
   }
 
   /** Name editing on the card. Accepts "#tag" and ":type" words as shortcuts. */
@@ -579,7 +586,7 @@ class App {
       items.push(
         { label: 'Add node here', hint: 'dbl-click', action: () => this.addNode(pos) },
         'separator',
-        { label: 'Fit view', hint: 'Enter', action: () => this.graph.fit() },
+        { label: 'Fit view', hint: '⇧F', action: () => this.graph.fit() },
         { label: 'Run layout', hint: 'L', action: () => this.graph.runLayout(this.map) },
         { label: this.cards.groups ? 'Hide groups' : 'Show groups', hint: 'G', action: () => this.toggleGroups() },
         { label: this.graph.focus ? 'Focus off' : 'Focus on', hint: 'F', action: () => this.toggleFocus() },
@@ -671,8 +678,8 @@ class App {
         else return;
         break;
       case 'Enter':
-        // Shift+Enter, or Enter with nothing selected, centers the view (on the selection, if any).
-        if (e.shiftKey || (!this.selection.length && this.map.nodes.length)) this.centerView();
+        // Shift+Enter centers the view (on the selection, if any).
+        if (e.shiftKey) this.centerView();
         else if (one) this.addSibling(one);
         else if (!this.map.nodes.length) this.createFirstNode();
         else return;
