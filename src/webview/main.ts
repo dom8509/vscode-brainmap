@@ -15,6 +15,7 @@ import {
   FilterOptions,
   applyGlobalFilter,
   computeSlice,
+  openingSlice,
   dataProperties,
   filterOptions,
   resolveNodeStyle,
@@ -111,6 +112,10 @@ const ICON = {
   style: '<circle cx="13.5" cy="6.5" r="1.5"/><circle cx="17.5" cy="10.5" r="1.5"/><circle cx="8.5" cy="7.5" r="1.5"/><circle cx="6.5" cy="12.5" r="1.5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4 4h-1.8a2 2 0 0 0-1.4 3.4A2 2 0 0 1 12 22z"/>',
   filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
   check: '<path d="M5 12l5 5 9-10"/>',
+  chevronRight: '<path d="M9 6l6 6-6 6"/>',
+  back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  star: '<path d="M12 4l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8z"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   focus: '<circle cx="12" cy="12" r="3"/><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>',
 };
 
@@ -256,6 +261,8 @@ class App {
     this.error.classList.add('hidden');
     const prev = this.map;
     this.map = msg.map;
+    // A file opens with its default slice.
+    if (!this.loaded) this.map.settings.activeSlice = openingSlice(this.map.settings);
     this.format = msg.format;
     this.fileName = msg.fileName;
     this.options = msg.options;
@@ -1466,7 +1473,10 @@ class App {
         if (this.settings?.pop === pop) this.settings = undefined;
         // A draft that was not applied is dropped with its window.
         if (kind === 'filter') this.editingFilter = undefined;
-        if (kind === 'slice') this.editingSlice = undefined;
+        if (kind === 'slice') {
+          this.editingSlice = undefined;
+          this.sliceMore = false;
+        }
         this.toolbar.querySelector(`[data-menu="${menu}"]`)?.classList.remove('open');
       },
     });
@@ -1494,7 +1504,7 @@ class App {
   private settingsBody(kind: Tab): HTMLElement {
     switch (kind) {
       case 'views': return this.viewMenu();
-      case 'slice': return h('div', {}, this.panelHead(this.editingSlice && (this.editingSlice as any).__orig ? 'Slice' : 'New slice'), this.sliceEditor(this.editingSlice!));
+      case 'slice': return h('div', {}, this.sliceHead(this.editingSlice!), this.sliceEditor(this.editingSlice!));
       case 'style': return h('div', {}, this.panelHead('Style'), this.stylePanel());
       case 'filter': return h('div', {}, this.panelHead('Filter'), this.globalFilterPanel());
       default: return h('div', {}, this.panelHead('Layout'), this.layoutPanel());
@@ -1798,13 +1808,12 @@ class App {
         onkeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') pick(name); } },
         h('span', { class: 'menu-check' }, (active ?? undefined) === name && svgIcon(ICON.check, 13)),
         h('span', { class: 'menu-label' }, name ?? 'Full graph'),
+        slice && slice.name === this.map.settings.defaultSlice && h('span', { class: 'menu-default', title: 'The slice this file opens with' }, 'Default'),
         h('span', { class: 'menu-meta' }, String(count)),
-        slice && h('button', { class: 'menu-edit', title: 'Edit slice', 'aria-label': `Edit slice ${slice.name}`, onclick: (e: Event) => {
+        slice && h('button', { class: 'menu-edit', title: 'Slice settings', 'aria-label': `Settings of slice ${slice.name}`, onclick: (e: Event) => {
           e.stopPropagation();
-          this.closeSettings();
-          this.editingSlice = { ...clone(slice), __orig: slice.name } as Slice;
-          this.openSettings('slice');
-        } }, svgIcon(ICON.pencil, 13)));
+          this.editSlice(slice);
+        } }, svgIcon(ICON.chevronRight, 13)));
     return h('div', { class: 'view-menu', role: 'menu' },
       row(undefined, loaded.nodes.length),
       slices.length > 0 && h('div', { class: 'menu-sep' }),
@@ -1849,6 +1858,78 @@ class App {
     );
   }
 
+  /** Opens a slice's settings, as Bases opens a view's with its >. */
+  private editSlice(slice: Slice) {
+    this.closeSettings();
+    this.sliceMore = false;
+    this.editingSlice = { ...clone(slice), __orig: slice.name } as Slice;
+    this.openSettings('slice');
+  }
+
+  /** The ⋯ menu of a slice's settings is open. */
+  private sliceMore = false;
+
+  /** A slice's title row, as in Bases: back to the list, the title, ⋯ (default, duplicate, delete) and ×. */
+  private sliceHead(s: Slice & { __orig?: string }) {
+    const name = s.__orig;
+    const slices = (this.map.settings.slices ??= []);
+    const saved = name !== undefined ? slices.find((x) => x.name === name) : undefined;
+    const isDefault = !!saved && this.map.settings.defaultSlice === name;
+    const item = (icon: string, label: string, action: () => void, cls = '') =>
+      h('button', { class: `menu-row ${cls}`.trim(), role: 'menuitem', onclick: () => { this.sliceMore = false; action(); } },
+        h('span', { class: 'menu-check' }, svgIcon(icon, 13)), h('span', { class: 'menu-label' }, label));
+    const more = saved && h('div', { class: 'slice-more' },
+      h('button', { class: this.sliceMore ? 'panel-close active' : 'panel-close', title: 'More slice options', 'aria-label': 'More slice options', 'aria-expanded': String(this.sliceMore),
+        onclick: () => { this.sliceMore = !this.sliceMore; this.renderSettings(); } }, svgIcon(ICON.more, 14)),
+      this.sliceMore && h('div', { class: 'view-menu slice-more-menu', role: 'menu' },
+        item(ICON.star, isDefault ? 'Remove as default slice' : 'Set as default slice', () => this.setDefaultSlice(isDefault ? undefined : saved.name)),
+        item(ICON.copy, 'Duplicate slice', () => this.duplicateSlice(saved)),
+        h('div', { class: 'menu-sep' }),
+        item(ICON.trash, 'Delete slice', () => this.deleteSlice(saved.name), 'danger'),
+      ));
+    return h('div', { class: 'panel-head' },
+      h('button', { class: 'panel-close', title: 'Back to slices', 'aria-label': 'Back to slices', onclick: () => {
+        this.closeSettings();
+        this.openSettings('views');
+      } }, svgIcon(ICON.back, 14)),
+      h('span', { class: 'panel-title' }, saved ? 'Slice settings' : 'New slice'),
+      more,
+      h('button', { class: 'panel-close', title: 'Close (Escape)', 'aria-label': 'Close', onclick: () => this.closeSettings() }, svgIcon(ICON.close, 14)),
+    );
+  }
+
+  /** The default slice is the one the file opens with; it moves to the top of the list, as in Bases. */
+  private setDefaultSlice(name: string | undefined) {
+    const slices = (this.map.settings.slices ??= []);
+    this.map.settings.defaultSlice = name;
+    const i = slices.findIndex((x) => x.name === name);
+    if (i > 0) slices.unshift(...slices.splice(i, 1));
+    this.commit();
+  }
+
+  private duplicateSlice(slice: Slice) {
+    const slices = (this.map.settings.slices ??= []);
+    const names = new Set(slices.map((x) => x.name));
+    let name = `${slice.name} copy`;
+    for (let i = 2; names.has(name); i++) name = `${slice.name} copy ${i}`;
+    const copy = { ...clone(slice), name };
+    slices.splice(slices.indexOf(slice) + 1, 0, copy);
+    this.commit({ panel: false });
+    this.editSlice(copy);
+  }
+
+  private deleteSlice(name: string) {
+    const settings = this.map.settings;
+    settings.slices = (settings.slices ?? []).filter((x) => x.name !== name);
+    if (settings.defaultSlice === name) settings.defaultSlice = undefined;
+    const wasShown = settings.activeSlice === name;
+    if (wasShown) settings.activeSlice = undefined;
+    this.closeSettings();
+    this.commit({ relayout: wasShown });
+    // Back to the list: the slice is gone.
+    this.openSettings('views');
+  }
+
   private sliceEditor(s: Slice & { __orig?: string }): HTMLElement {
     const types = uniqueTypes(this.map);
     const save = () => {
@@ -1860,6 +1941,7 @@ class App {
       if (idx >= 0) slices[idx] = slice;
       else slices.push(slice);
       if (__orig && this.map.settings.activeSlice === __orig) this.map.settings.activeSlice = slice.name;
+      if (__orig && this.map.settings.defaultSlice === __orig) this.map.settings.defaultSlice = slice.name;
       this.closeSettings();
       this.showSlice(slice.name);
     };
@@ -1917,14 +1999,6 @@ class App {
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
         h('button', { onclick: () => this.closeSettings() }, 'Cancel'),
-        s.__orig && h('button', { class: 'danger', onclick: () => {
-          const name = s.__orig;
-          this.map.settings.slices = (this.map.settings.slices ?? []).filter((x) => x.name !== name);
-          const wasShown = this.map.settings.activeSlice === name;
-          if (wasShown) this.map.settings.activeSlice = undefined;
-          this.closeSettings();
-          this.commit({ relayout: wasShown });
-        } }, 'Delete slice'),
       ),
     );
   }

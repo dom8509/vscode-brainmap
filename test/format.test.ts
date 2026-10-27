@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectFormat, parse, serialize } from '../src/shared/format';
-import { computeSlice, normalize, resolveNodeStyle } from '../src/shared/model';
+import { computeSlice, normalize, openingSlice, resolveNodeStyle } from '../src/shared/model';
 
 const yamlText = `
 title: Demo
@@ -114,4 +114,12 @@ test('slices hide orphans or show only them', () => {
   assert.deepEqual(ids({ orphans: 'hide', nodeFilter: { property: 'type', op: 'is', value: 'x' } }), ['a', 'b']);
   // An unknown value does nothing.
   assert.deepEqual(ids({ orphans: 'maybe' }), ['a', 'b', 'c', 'd']);
+});
+
+test('a file opens with its default slice, else the one shown last', () => {
+  const slices = [{ name: 'A' }, { name: 'B' }];
+  assert.equal(openingSlice({ slices, activeSlice: 'A', defaultSlice: 'B' }), 'B');
+  assert.equal(openingSlice({ slices, activeSlice: 'A' }), 'A');
+  assert.equal(openingSlice({ slices, activeSlice: 'A', defaultSlice: 'gone' }), 'A');
+  assert.equal(openingSlice({ slices, activeSlice: 'gone' }), undefined);
 });

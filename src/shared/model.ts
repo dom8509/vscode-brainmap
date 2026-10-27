@@ -143,6 +143,8 @@ export interface Settings {
   slices?: Slice[];
   /** Name of the slice currently shown. */
   activeSlice?: string;
+  /** Name of the slice the file opens with. Left out: it opens with the slice shown last. */
+  defaultSlice?: string;
   /** 'hide' removes nodes outside the slice, 'dim' greys them out. */
   sliceMode?: 'hide' | 'dim';
 }
@@ -401,6 +403,13 @@ export function tidySlice(slice: Slice): Slice {
   if (nf) out.nodeFilter = nf;
   if (ef) out.edgeFilter = ef;
   return out;
+}
+
+/** The slice a file opens with: its default slice while that exists, else the one shown last. */
+export function openingSlice(settings: Settings): string | undefined {
+  const names = new Set((settings.slices ?? []).map((s) => s.name));
+  if (settings.defaultSlice && names.has(settings.defaultSlice)) return settings.defaultSlice;
+  return settings.activeSlice && names.has(settings.activeSlice) ? settings.activeSlice : undefined;
 }
 
 /** Computes which nodes and edges belong to a slice. */

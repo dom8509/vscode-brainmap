@@ -45,7 +45,9 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Toolbar windows** open under their button, with a title and ×; `Escape` or a click outside closes them.
   *Layout* (Physics / Hierarchy / More…, spacing, edge length, direction, hierarchy types, run/fit),
   *Style* (colors per type, tag and connection type, nodes outside the slice), *Filter* (the global filter).
-  The slice switcher lists the slices with their counts; the pencil edits one, *New slice* adds one.
+  The slice switcher lists the slices with their counts; `>` opens a slice's settings, *New slice* adds one.
+  In a slice's settings, ← goes back to the list and `⋯` has *Set as default slice* (the file opens with it;
+  it moves to the top and shows *Default*), *Duplicate slice* and *Delete slice*.
 - **Delete** – right-click → Delete, the bar, or `Backspace`/`Del`. You are always asked first.
   Deleting a node also deletes all its connections.
 - **Bottom bars** – hidden at first. The **?** button at the bottom left shows the keyboard shortcuts,
@@ -58,7 +60,7 @@ Built on [Cytoscape.js](https://js.cytoscape.org/) with animated layouts
 - **Hierarchy by dependency type** – pick which connection types build the hierarchy.
 - **Proximity, styling and slices** – spacing, edge length per connection type,
   colors by type or tag, and saved slices (filters plus a neighbourhood).
-- **Filters** (slice switcher → *New slice* or the pencil) – work like the filters of
+- **Filters** (slice switcher → *New slice* or `>`) – work like the filters of
   [Bases](https://github.com/dom8509/vscode-bases): a filter is a property, an operator and a value.
   Groups combine filters with *All*, *Any* or *None of the following are true* and can be nested.
   The property list has a search box and groups the properties by where they come from.
@@ -180,6 +182,7 @@ settings:
       direction: downstream
     # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend
+  defaultSlice: Backend        # the slice the file opens with; leave out to open with the one shown last
   sliceMode: hide              # hide | dim
 nodes:
   - id: web
