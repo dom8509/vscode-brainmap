@@ -93,6 +93,7 @@ settings:
       type: [frontend, service, db]
   style:
     colorBy: type              # type | tag | none
+    edgeLabel: label           # what connections show: label | type | none
     nodeTypes:
       service: { color: '#59a14f', shape: round-rectangle, size: 40 }
     tags:

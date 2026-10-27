@@ -1361,6 +1361,11 @@ class App {
         style.colorBy ?? 'type',
         (v) => { style.colorBy = v as any; this.commit({ panel: false }); },
       )),
+      field('Connections show', select(
+        [{ value: 'label', label: 'Label' }, { value: 'type', label: 'Type' }, { value: 'none', label: 'Nothing' }],
+        style.edgeLabel ?? 'label',
+        (v) => { style.edgeLabel = v as any; this.commit({ panel: false }); },
+      )),
       h('h4', {}, 'Node types'), nodeRows.length ? nodeRows : h('p', { class: 'muted' }, 'No node types yet. Set a type in the inspector.'),
       h('h4', {}, 'Tags'), tagRows.length ? tagRows : h('p', { class: 'muted' }, 'No tags yet.'),
       h('h4', {}, 'Dependency (edge) types'),

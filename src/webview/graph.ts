@@ -290,13 +290,14 @@ export class GraphView {
           });
         }
       }
+      const edgeLabel = map.settings.style?.edgeLabel ?? 'label';
       for (const e of map.edges) {
         const st = resolveEdgeStyle(map, e);
         const data = {
           id: e.id,
           source: e.source,
           target: e.target,
-          label: e.label ?? '',
+          label: edgeLabel === 'label' ? e.label ?? '' : edgeLabel === 'type' ? e.type ?? '' : '',
           sourceArrow: e.directed === false ? 'triangle' : 'none',
           type: e.type ?? '',
           color: st.color,

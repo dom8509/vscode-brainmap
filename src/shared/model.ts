@@ -90,8 +90,12 @@ export interface LayoutSettings {
 
 export type ColorBy = 'type' | 'tag' | 'none';
 
+export type EdgeLabel = 'label' | 'type' | 'none';
+
 export interface StyleSettings {
   colorBy?: ColorBy;
+  /** What connections show as text. Default: their label. */
+  edgeLabel?: EdgeLabel;
   nodeTypes?: Record<string, NodeStyle>;
   edgeTypes?: Record<string, EdgeStyle>;
   tags?: Record<string, NodeStyle>;
