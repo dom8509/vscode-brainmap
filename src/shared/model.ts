@@ -100,6 +100,8 @@ export interface StyleSettings {
   groupBy?: string;
   /** Zoomed far out, nodes turn into plain blocks without text. Default: true. */
   simplifyZoomedOut?: boolean;
+  /** Properties (keys of a node's data) whose values show on the card, under the name. */
+  cardProperties?: string[];
   nodeTypes?: Record<string, NodeStyle>;
   edgeTypes?: Record<string, EdgeStyle>;
   tags?: Record<string, NodeStyle>;
@@ -383,6 +385,18 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
     const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : set.has('list') ? 'list' : 'text';
     return { id: `data.${k}`, label: k, kind };
   });
+}
+
+/** The values of the chosen properties as the card shows them: "done · Bob, Ann". Empty ones are left out. */
+export function cardProperties(node: BrainNode, keys: string[] | undefined): string {
+  const text = (v: unknown) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).trim();
+  return (keys ?? [])
+    .map((k) => {
+      const v = node.data?.[k];
+      return Array.isArray(v) ? v.map(text).filter(Boolean).join(', ') : text(v);
+    })
+    .filter(Boolean)
+    .join(' · ');
 }
 
 export function edgeValues(e: BrainEdge): FilterValues {

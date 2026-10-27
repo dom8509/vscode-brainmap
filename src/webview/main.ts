@@ -1651,11 +1651,40 @@ class App {
         h('input', { type: 'checkbox', checked: style.simplifyZoomedOut ?? true,
           onchange: (e: Event) => { style.simplifyZoomedOut = (e.target as HTMLInputElement).checked; this.commit({ panel: false }); } }),
         'Hide text on nodes when zoomed far out'),
+      this.cardPropertiesPanel(),
       this.readOnly && this.linksPanel(),
       h('h4', {}, 'Node types'), nodeRows.length ? nodeRows : h('p', { class: 'muted' }, 'No node types yet. Set a type in the inspector.'),
       h('h4', {}, 'Tags'), tagRows.length ? tagRows : h('p', { class: 'muted' }, 'No tags yet.'),
       h('h4', {}, 'Dependency (edge) types'),
       edgeRows.length ? [h('p', { class: 'muted small' }, 'color · line · length (proximity in force layouts)'), ...edgeRows] : h('p', { class: 'muted' }, 'No edge types yet.'),
+    );
+  }
+
+  /** Which properties show on the cards. Saved as `style.cardProperties`. */
+  private cardPropertiesPanel(): HTMLElement | false {
+    const style = (this.map.settings.style ??= {});
+    const all = dataProperties(this.map).map((p) => p.label);
+    const chosen = style.cardProperties ?? [];
+    if (!all.length && !chosen.length) return false;
+    const set = (next: string[]) => {
+      style.cardProperties = next.length ? next : undefined;
+      this.commit();
+    };
+    const rest = all.filter((p) => !chosen.includes(p));
+    return h('div', {},
+      h('h4', {}, 'Properties on cards'),
+      h('div', { class: 'link-props' },
+        chosen.length
+          ? chosen.map((p) => h('span', { class: 'chip' }, p,
+            h('button', { class: 'chip-x', title: `Remove ${p}`, 'aria-label': `Remove ${p}`, onclick: () => set(chosen.filter((x) => x !== p)) }, '×')))
+          : h('span', { class: 'muted small' }, 'None: cards show the name and type.'),
+      ),
+      rest.length > 0 && select(
+        [{ value: '', label: '+ Add property…' }, ...rest.map((p) => ({ value: p }))],
+        '',
+        (v) => v && set([...chosen, v]),
+        { 'aria-label': 'Add a property to the cards', title: 'Its value shows on each card, under the name' },
+      ),
     );
   }
 

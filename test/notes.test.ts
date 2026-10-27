@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
-import { computeSlice, dataProperties } from '../src/shared/model';
+import { cardProperties, computeSlice, dataProperties } from '../src/shared/model';
 import { NoteFile, emptyView, linkCandidates, notesToMap, readView } from '../src/shared/notes';
 
 const note = (path: string, properties: Record<string, unknown> = {}, links: string[] = [], tags: string[] = []): NoteFile => {
@@ -120,4 +120,14 @@ test('a chosen property of objects links by their target, to a file name or an i
     'notes/a.md > notes/c.md refers_to',
   ]);
   assert.deepEqual(map.nodes[0].data?.refers_to, ['ID_1', 'c']);
+});
+
+test('cards show the values of the chosen properties', () => {
+  const view = readView({ settings: { style: { cardProperties: ['status', 'owner', 'missing'] } } });
+  const map = notesToMap([note('a.md', { status: 'done', owner: ['Bob', 'Ann'] }), note('b.md')], view);
+  assert.deepEqual(map.settings.style?.cardProperties, ['status', 'owner', 'missing']);
+  assert.equal(cardProperties(map.nodes[0], map.settings.style?.cardProperties), 'done · Bob, Ann');
+  assert.equal(cardProperties(map.nodes[1], map.settings.style?.cardProperties), '');
+  // Saved and read back.
+  assert.deepEqual(parseView(serializeView(view, 'yaml')).settings.style?.cardProperties, ['status', 'owner', 'missing']);
 });

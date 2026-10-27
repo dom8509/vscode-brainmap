@@ -10,6 +10,7 @@ import {
   computeSlice,
   autoColor,
   resolveEdgeStyle,
+  cardProperties,
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
@@ -289,6 +290,7 @@ export class GraphView {
           groupColor,
           groupName: group ? group.charAt(0).toUpperCase() + group.slice(1) : '',
           tags: n.tags ?? [],
+          props: cardProperties(n, map.settings.style?.cardProperties),
           // Wide enough for the name, within limits so the graph stays tidy.
           width: Math.round(Math.max(170, Math.min(260, label.length * 7.4 + 96))),
         };

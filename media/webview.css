@@ -457,6 +457,14 @@ button:disabled {
 .card-type {
   font-size: 11px;
   color: var(--bm-muted);
+  flex-shrink: 0;
+}
+.card-props {
+  font-size: 11px;
+  color: var(--bm-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .card-input {
   pointer-events: auto;

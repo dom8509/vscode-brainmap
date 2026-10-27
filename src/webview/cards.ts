@@ -157,7 +157,7 @@ export class CardLayer {
   private updateContent(card: Card, n: NodeSingular) {
     const d = n.data();
     // Tags stay off the card to keep it calm; the hover card and details show them.
-    const sig = [d.label, d.type, d.typeName, d.color, d.width].join('|');
+    const sig = [d.label, d.type, d.typeName, d.props, d.color, d.width].join('|');
     if (sig === card.sig || this.editing === n.id()) return;
     card.sig = sig;
     const color: string = d.color;
@@ -172,7 +172,10 @@ export class CardLayer {
       tile,
       h('span', { class: 'card-text' },
         card.label,
-        d.typeName && h('span', { class: 'card-meta' }, h('span', { class: 'card-type' }, d.typeName)),
+        (d.typeName || d.props) && h('span', { class: 'card-meta' },
+          d.typeName && h('span', { class: 'card-type' }, d.typeName),
+          d.props && h('span', { class: 'card-props' }, d.typeName ? `· ${d.props}` : d.props),
+        ),
       ),
     );
   }

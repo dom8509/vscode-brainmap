@@ -92,6 +92,8 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
 - **Connection** = a link: `[[note]]`, `![[note]]` or `[text](note.md)` in the text (no type),
   a `[[note]]` in a property (the property name is the type, e.g. `depends-on: "[[api]]"`),
   or a row of Bases' link database (with its type).
+- **Show properties on the cards** (*Style* → *Properties on cards*): pick properties, e.g. `status`
+  or `owner`; their values show on each card under the name.
 - **Pick which properties link** (*Style* → *Links from properties*): by default every property with a `[[link]]`
   connects. Set *Connect notes by* to *Only the properties below* and add them from the *+ Add property…* list
   (× removes one): only those connect, and plain
@@ -151,6 +153,7 @@ settings:
     edgeLabel: label           # what connections show: label | type | none
     simplifyZoomedOut: true    # zoomed far out, nodes become blocks without text
     groupBy: type              # what Groups (G) are made of: type | tag | data.<key>
+    cardProperties: [status]   # properties whose values show on the cards, under the name
     nodeTypes:
       service: { color: '#59a14f', shape: round-rectangle, size: 40 }
     tags:
