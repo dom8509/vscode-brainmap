@@ -26,7 +26,7 @@ export type FilterNode = FilterGroup | FilterCondition;
 
 export type FilterScope = 'node' | 'edge';
 
-type PropertyKind = 'text' | 'list' | 'number' | 'choice';
+export type PropertyKind = 'text' | 'list' | 'number' | 'choice';
 
 export interface FilterProperty {
   id: string;
@@ -71,17 +71,20 @@ export const OPERATORS: { op: FilterOperator; label: string; needsValue: boolean
 ];
 
 export const CONJUNCTIONS: { conj: Conjunction; label: string }[] = [
-  { conj: 'and', label: 'All of the following' },
-  { conj: 'or', label: 'Any of the following' },
-  { conj: 'not', label: 'None of the following' },
+  { conj: 'and', label: 'All the following are true' },
+  { conj: 'or', label: 'Any of the following are true' },
+  { conj: 'not', label: 'None of the following are true' },
 ];
 
 export function propertiesFor(scope: FilterScope): FilterProperty[] {
   return scope === 'node' ? NODE_PROPERTIES : EDGE_PROPERTIES;
 }
 
-export function propertyOf(scope: FilterScope, id: string): FilterProperty | undefined {
-  return propertiesFor(scope).find((p) => p.id === id);
+/** A property by id; `data.<key>` is a node's own data, compared as text unless `extra` knows better. */
+export function propertyOf(scope: FilterScope, id: string, extra: FilterProperty[] = []): FilterProperty | undefined {
+  const found = propertiesFor(scope).find((p) => p.id === id) ?? extra.find((p) => p.id === id);
+  if (found || scope !== 'node' || !id.startsWith('data.')) return found;
+  return { id, label: id.slice(5), kind: 'text' };
 }
 
 export function operatorsFor(property: FilterProperty | undefined) {
@@ -172,6 +175,13 @@ export function evaluate(f: FilterNode | undefined, values: FilterValues): boole
 /** Whether a filter lets an element through; an inactive filter lets everything through. */
 export function matches(f: FilterNode | undefined, values: FilterValues): boolean {
   return evaluate(f, values) !== false;
+}
+
+/** How many conditions of a filter are active: the number on the Filter button. */
+export function countConditions(f: FilterNode | undefined): number {
+  if (!f) return 0;
+  if (!isGroup(f)) return isActive(f) ? 1 : 0;
+  return childrenOf(f).reduce((n, c) => n + countConditions(c), 0);
 }
 
 /** Drops empty groups, so the file only keeps what filters. Undefined when nothing is left. */

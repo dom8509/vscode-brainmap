@@ -1,5 +1,6 @@
 import * as yaml from 'js-yaml';
 import { BrainMap, FileFormat, emptyMap, normalize } from './model';
+import { BrainView, emptyView, readView } from './notes';
 
 export function detectFormat(text: string, fallback: FileFormat = 'yaml'): FileFormat {
   const t = text.trimStart();
@@ -11,6 +12,20 @@ export function parse(text: string): BrainMap {
   if (!text.trim()) return emptyMap();
   const raw = detectFormat(text) === 'json' ? JSON.parse(text) : yaml.load(text);
   return normalize(raw);
+}
+
+export function parseView(text: string): BrainView {
+  if (!text.trim()) return emptyView();
+  return readView(detectFormat(text) === 'json' ? JSON.parse(text) : yaml.load(text));
+}
+
+export function serializeView(view: BrainView, format: FileFormat): string {
+  return dump(clean({ title: view.title, source: view.source, settings: view.settings }), format);
+}
+
+function dump(data: unknown, format: FileFormat): string {
+  if (format === 'json') return JSON.stringify(data, null, 2) + '\n';
+  return yaml.dump(data, { noRefs: true, lineWidth: 120, flowLevel: -1 });
 }
 
 /** Removes undefined values and empty arrays/objects to keep files tidy. */
@@ -39,6 +54,5 @@ export function serialize(map: BrainMap, format: FileFormat): string {
     nodes: map.nodes,
     edges: map.edges,
   });
-  if (format === 'json') return JSON.stringify(data, null, 2) + '\n';
-  return yaml.dump(data, { noRefs: true, lineWidth: 120, flowLevel: -1 });
+  return dump(data, format);
 }

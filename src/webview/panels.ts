@@ -59,12 +59,16 @@ export class Popover {
     const t = e.target as Element;
     const owner = this.opts.owner;
     if (this.el.contains(t)) return;
+    // A list a field inside opened over the page (e.g. a filter's values) belongs to the popover.
+    if (t.closest?.('.floating-list')) return;
     if (typeof owner === 'string' ? t.closest?.(owner) : owner?.contains(t)) return;
     this.close();
   };
 
   private esc = (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return;
+    // An open list inside (a property picker, a value list) closes first, on its own.
+    if (document.querySelector('.floating-list:not(.hidden)')) return;
     e.preventDefault();
     e.stopPropagation();
     this.close();

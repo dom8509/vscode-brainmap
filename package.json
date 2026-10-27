@@ -1,9 +1,10 @@
 {
   "name": "vscode-brainmap",
   "displayName": "BrainMap Graph Editor",
-  "description": "Create and edit graphs visually in .brainmap files (JSON or YAML) with animated layouts, styling by type/tag and graph slices.",
+  "description": "Create and edit graphs visually in .brainmap files (JSON or YAML) with animated layouts, styling by type/tag and graph slices, and graphs of your Markdown notes in .brainview files.",
   "version": "0.1.0",
   "publisher": "dom8509",
+  "icon": "media/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -25,6 +26,9 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
+  "extensionDependencies": [
+    "dom8509.vscode-bases"
+  ],
   "contributes": {
     "customEditors": [
       {
@@ -33,6 +37,16 @@
         "selector": [
           {
             "filenamePattern": "*.brainmap"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "brainmap.notesView",
+        "displayName": "BrainMap Notes View",
+        "selector": [
+          {
+            "filenamePattern": "*.brainview"
           }
         ],
         "priority": "default"
@@ -45,7 +59,8 @@
           "BrainMap"
         ],
         "extensions": [
-          ".brainmap"
+          ".brainmap",
+          ".brainview"
         ]
       }
     ],
@@ -53,6 +68,11 @@
       {
         "command": "brainmap.newFile",
         "title": "BrainMap: New Graph",
+        "category": "BrainMap"
+      },
+      {
+        "command": "brainmap.newView",
+        "title": "BrainMap: New Notes View",
         "category": "BrainMap"
       },
       {
@@ -72,12 +92,12 @@
       "editor/title": [
         {
           "command": "brainmap.openAsText",
-          "when": "activeCustomEditorId == brainmap.graphEditor",
+          "when": "activeCustomEditorId == brainmap.graphEditor || activeCustomEditorId == brainmap.notesView",
           "group": "navigation"
         },
         {
           "command": "brainmap.openGraphEditor",
-          "when": "resourceExtname == .brainmap && !activeCustomEditorId",
+          "when": "resourceExtname =~ /^\\.brain(map|view)$/ && !activeCustomEditorId",
           "group": "navigation"
         }
       ]

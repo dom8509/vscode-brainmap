@@ -12,7 +12,10 @@ import {
   resolveEdgeStyle,
   resolveNodeStyle,
 } from '../shared/model';
-import { CARD_HEIGHT } from './cards';
+import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
+
+/** From this many shown nodes on, the force layouts give way to a grid. */
+const HUGE_GRAPH = 1500;
 import { laneLayout, laneOf } from './lanes';
 
 cytoscape.use(cola);
@@ -481,14 +484,32 @@ export class GraphView {
     const byType = (a: any, b: any) =>
       a.isNode() && b.isNode() ? String(a.data('group') || '\uffff').localeCompare(String(b.data('group') || '\uffff')) : 0;
     const force = l.name === 'force' || l.name === 'fcose';
+    const large = force && visible.nodes().length >= LARGE_GRAPH;
     // Force layouts start from an arrangement where each group is one area, then refine it.
-    const start = grouped && force ? this.groupedPositions(visible, l, lengthOf) : undefined;
+    const start = grouped && force && !large ? this.groupedPositions(visible, l, lengthOf) : undefined;
     // While live physics runs, helper edges keep the groups together.
     const ghosts = start && l.name === 'force' ? this.addGroupEdges(visible.nodes()) : undefined;
     if (ghosts) eles = visible.union(ghosts);
     // Helper edges are a bit longer than real ones: connections win.
     const length = (edge: any) => (edge.hasClass('ghost') ? l.edgeLength * GHOST_LENGTH : lengthOf(edge));
-    switch (l.name) {
+    switch (large ? 'large' : l.name) {
+      case 'large':
+        // Past a few thousand nodes even one fCoSE run takes many seconds: a grid, by type, is instant.
+        options = visible.nodes().length >= HUGE_GRAPH ? { name: 'grid', ...anim, animate: false, fit: true, avoidOverlapPadding: l.nodeSpacing, sort: byType } : {
+          name: 'fcose',
+          ...anim,
+          animate: false,
+          fit: true,
+          // Draft quality is faster but piles notes without links onto one spot.
+          quality: 'default',
+          numIter: 1000,
+          randomize: true,
+          nodeSeparation: l.nodeSpacing,
+          idealEdgeLength: length,
+          nodeRepulsion: () => 4500 + l.nodeSpacing * 100,
+          edgeElasticity: () => 0.45,
+        };
+        break;
       case 'force':
       default:
         options = {
@@ -590,7 +611,7 @@ export class GraphView {
         if (selected.length) this.centerOn(selected);
         else if ((fit && l.name === 'force' && l.live) || !this.allInView()) this.fit();
       };
-      if (l.name === 'force' && l.live) {
+      if (l.name === 'force' && l.live && !large) {
         window.setTimeout(() => this.layout === layout && settle(), 1200);
         // Physics may still spread the graph out after that: fit once more if it grew out of view.
         window.setTimeout(() => this.layout === layout && !this.allInView() && settle(), 3000);
@@ -633,6 +654,26 @@ export class GraphView {
     if (eles.empty()) return;
     this.cy.stop(true);
     this.cy.animate({ center: { eles } } as any, { duration });
+  }
+
+  /**
+   * Brings elements into view: centers them and zooms out until all fit; zoomed far
+   * out, it also zooms in to where cards are readable.
+   */
+  showElements(ids: string[], duration = 350) {
+    const eles = this.cy.collection(ids.map((id) => this.cy.getElementById(id)) as any).not('.hidden');
+    if (eles.empty()) return;
+    this.cy.resize();
+    const bb = eles.boundingBox({ includeLabels: false } as any);
+    const pad = 60;
+    const w = this.cy.width();
+    const h = this.cy.height();
+    const fits = Math.min((w - 2 * pad) / Math.max(bb.w, 1), (h - 2 * pad) / Math.max(bb.h, 1));
+    const zoom = Math.max(this.cy.minZoom(), Math.min(fits, Math.max(this.cy.zoom(), 0.8), this.cy.maxZoom()));
+    const cx = (bb.x1 + bb.x2) / 2;
+    const cy = (bb.y1 + bb.y2) / 2;
+    this.cy.stop(true);
+    this.cy.animate({ zoom, pan: { x: w / 2 - cx * zoom, y: h / 2 - cy * zoom } } as any, { duration });
   }
 
   /** Screen box (relative to the canvas) of an element. */
