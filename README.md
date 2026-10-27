@@ -89,7 +89,8 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
   a `[[note]]` in a property (the property name is the type, e.g. `depends-on: "[[api]]"`),
   or a row of Bases' link database (with its type).
 - **Pick which properties link** (*Style* → *Links from properties*): by default every property with a `[[link]]`
-  connects. Uncheck *Every property with [[links]]* and check the ones you want: only those connect, and plain
+  connects. Set *Connect notes by* to *Only the properties below* and add them from the *+ Add property…* list
+  (× removes one): only those connect, and plain
   names count too (`depends-on: api`, `owners: [ann, bob]` finds `ann.md`). A list of objects links by each
   object's `target` (or `link`, `note`, `path`, `id`, `key`): `refers_to: [{ target: ID_1 }]`. A name finds a note by
   its path, its file name or its `id` property. Saved as `source.links`.

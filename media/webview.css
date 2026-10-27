@@ -1759,3 +1759,9 @@ button:disabled {
   background: var(--bm-accent-bg);
   color: var(--bm-accent-fg);
 }
+.link-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}

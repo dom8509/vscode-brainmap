@@ -1661,13 +1661,30 @@ class App {
     };
     // Switching away from automatic starts with the properties that link now.
     const linkingNow = () => uniqueTypes(this.map).edgeTypes.filter((t) => links.properties.includes(t));
+    const chosen = links.chosen ?? [];
+    const rest = links.properties.filter((p) => !chosen.includes(p));
     return h('div', {},
       h('h4', {}, 'Links from properties'),
-      h('p', { class: 'muted small' }, 'Checked properties become connections, named after the property. Their values may be [[links]] or plain note names.'),
-      h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: auto, onchange: (e: Event) => set((e.target as HTMLInputElement).checked ? undefined : linkingNow()) }),
-        'Every property with [[links]]'),
-      !auto && checklist(links.properties, links.chosen, (v) => set(v)),
+      field('Connect notes by', select(
+        [{ value: 'auto', label: 'Every property with [[links]]' }, { value: 'chosen', label: 'Only the properties below' }],
+        auto ? 'auto' : 'chosen',
+        (v) => set(v === 'auto' ? undefined : linkingNow()),
+        { title: 'Which frontmatter properties become connections' },
+      )),
+      !auto && [
+        h('div', { class: 'link-props' },
+          chosen.length
+            ? chosen.map((p) => h('span', { class: 'chip' }, p,
+              h('button', { class: 'chip-x', title: `Remove ${p}`, 'aria-label': `Remove ${p}`, onclick: () => set(chosen.filter((x) => x !== p)) }, '×')))
+            : h('span', { class: 'muted small' }, 'None: no property links.'),
+        ),
+        rest.length > 0 && select(
+          [{ value: '', label: '+ Add property…' }, ...rest.map((p) => ({ value: p }))],
+          '',
+          (v) => v && set([...chosen, v]),
+          { 'aria-label': 'Add a property that links', title: 'Its values become connections: [[links]], plain note names or objects with a target' },
+        ),
+      ],
     );
   }
 
