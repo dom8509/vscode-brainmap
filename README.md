@@ -153,3 +153,15 @@ npm run package    # build a .vsix
 Press `F5` in VS Code to start an Extension Development Host with the `examples` folder.
 
 Install the built package with `code --install-extension vscode-brainmap-0.1.0.vsix`.
+
+### Releases
+
+Push a version tag for a commit on `main` and GitHub Actions builds the `.vsix` and attaches it to a new release:
+
+```sh
+git checkout main && git pull
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The tag sets the version (`v0.2.0` → `0.2.0`). Tags on other branches are rejected.
