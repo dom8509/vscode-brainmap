@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
-import { cardProperties, chipColor, choiceKeys, computeSlice, dataProperties } from '../src/shared/model';
+import { cardLabel, cardProperties, chipColor, choiceKeys, computeSlice, dataProperties } from '../src/shared/model';
 import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote, viewSections } from '../src/shared/notes';
 import { bodyText, keyLabel, sectionId, sectionPath } from '../src/shared/sections';
 
@@ -199,4 +199,17 @@ test('repeating short values are states and get colored chips', () => {
   assert.notEqual(chipColor('done'), chipColor('blocked'));
   const rows = cardProperties(map.nodes[0], ['status', 'owner'], () => [], new Set(['status']));
   assert.deepEqual(rows.map((r) => r.values), [[{ text: 'done', color: chipColor('done') }], [{ text: 'Ann' }]]);
+});
+
+test('cards show own names for properties and sections', () => {
+  const id = sectionId('Text > ```gherkin');
+  const node = { id: 'a.md', label: 'a', data: { status: 'open', [id]: 'Given' } };
+  const labels = { [id]: 'Scenario', status: '  ' };
+  assert.deepEqual(cardProperties(node, ['status', id], () => [], undefined, labels).map((r) => r.label), ['status', 'Scenario']);
+  assert.equal(cardLabel(id), 'Text › gherkin block');
+  // Saved in the view.
+  const view = readView({ settings: { style: { cardProperties: [id], cardLabels: labels, cardKeys: false } } });
+  const back = parseView(serializeView(view, 'yaml')).settings.style;
+  assert.equal(back?.cardLabels?.[id], 'Scenario');
+  assert.equal(back?.cardKeys, false);
 });

@@ -294,7 +294,7 @@ export class GraphView {
         const group = laneOf(n, groupBy);
         const groupStyle = groupBy === 'type' ? map.settings.style?.nodeTypes : groupBy === 'tag' ? map.settings.style?.tags : undefined;
         const groupColor = group ? groupStyle?.[group]?.color ?? autoColor(group) : '';
-        const props = cardProperties(n, chosen, (k) => linked.get(`${n.id}\n${k}`) ?? [], choices);
+        const props = cardProperties(n, chosen, (k) => linked.get(`${n.id}\n${k}`) ?? [], choices, map.settings.style?.cardLabels);
         const data = {
           id: n.id,
           label,
@@ -307,6 +307,7 @@ export class GraphView {
           groupName: group ? group.charAt(0).toUpperCase() + group.slice(1) : '',
           tags: n.tags ?? [],
           props,
+          keys: map.settings.style?.cardKeys ?? true,
           height: cardHeight(props.length),
           // Wide enough for the name, within limits so the graph stays tidy; property lines want a little more.
           width: Math.round(Math.max(props.length ? 210 : 170, Math.min(260, label.length * 7.4 + 96))),

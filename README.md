@@ -95,7 +95,9 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
 - **Show properties on the cards** (*Style* → *Properties on cards*): pick properties, e.g. `status`
   or `owner`; each gets a line on the card, its name and its value, and the card grows. Zoomed out
   (below 70 %) cards show only name and type again. Short values that repeat, like a status, are
-  colored chips: done green, in progress amber, blocked red, open blue, any other value a color of its own. A value that links to a shown note is a link:
+  colored chips: done green, in progress amber, blocked red, open blue, any other value a color of its own.
+  Click a chosen property's name to give it a name of its own on the cards (`cardLabels`); empty goes back
+  to the key. *Show property names on cards* off shows only the values (`cardKeys: false`). A value that links to a shown note is a link:
   click it to open that note. *+ Add section…* shows a part of each note's text, as Bases' sections do:
   headings from the outside in, separated by `>`, maybe ending in a code block — `Text > Details`,
   ```` Text > ```gherkin ```` (the first `gherkin` block in *Text*), ```` ```text[2] ```` (the second `text` block).

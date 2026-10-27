@@ -480,6 +480,9 @@ button:disabled {
   padding-top: 1px;
   border-top: 1px solid color-mix(in srgb, var(--bm-border) 70%, transparent);
 }
+.card-rows.no-keys {
+  grid-template-columns: minmax(0, 1fr);
+}
 .card-key {
   color: var(--bm-muted);
   max-width: 90px;
@@ -850,6 +853,24 @@ button:disabled {
   border-radius: 11px;
   background: color-mix(in srgb, var(--bm-fg) 9%, transparent);
   font-size: 12px;
+}
+.chip-name {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: text;
+}
+.chip-name:hover {
+  text-decoration: underline dotted;
+}
+.chip-input {
+  height: 20px;
+  width: 130px;
+  padding: 0 6px;
+  font-size: 12px;
+  border-radius: 10px;
 }
 .chip-x {
   border: none;
@@ -1523,7 +1544,7 @@ button:disabled {
 .pop-settings p, .panel p {
   margin: 0;
 }
-.pop-settings button:where(:not(.pill, .chip-x, .panel-close, .picker-button, .seg, .link, .filter-x)) {
+.pop-settings button:where(:not(.pill, .chip-x, .chip-name, .panel-close, .picker-button, .seg, .link, .filter-x)) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
