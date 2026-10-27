@@ -1385,6 +1385,12 @@ class App {
         style.edgeLabel ?? 'label',
         (v) => { style.edgeLabel = v as any; this.commit({ panel: false }); },
       )),
+      field('Group nodes by', select(
+        laneAttributes(this.map.nodes),
+        style.groupBy ?? 'type',
+        (v) => { style.groupBy = v === 'type' ? undefined : v; this.commit({ relayout: this.cards.groups, panel: false }); },
+        { title: 'What the areas shown with Groups (G) are made of' },
+      )),
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: style.simplifyZoomedOut ?? true,
           onchange: (e: Event) => { style.simplifyZoomedOut = (e.target as HTMLInputElement).checked; this.commit({ panel: false }); } }),

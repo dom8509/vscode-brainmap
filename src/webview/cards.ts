@@ -213,10 +213,10 @@ export class CardLayer {
         const p = n.position();
         const w = n.data('width') / 2;
         const card = { x1: p.x - w, y1: p.y - CARD_HEIGHT / 2, x2: p.x + w, y2: p.y + CARD_HEIGHT / 2 };
-        const type = n.data('type') as string;
+        const type = n.data('group') as string;
         all.push({ type: type ?? '', card });
         if (!type) return;
-        const g = groups.get(type) ?? { color: n.data('typeColor'), name: n.data('typeName'), n: 0, boxes: [] as Rect[], cards: [] as Rect[] };
+        const g = groups.get(type) ?? { color: n.data('groupColor'), name: n.data('groupName'), n: 0, boxes: [] as Rect[], cards: [] as Rect[] };
         g.cards.push(card);
         g.boxes.push({ x1: card.x1 - HULL_PAD, y1: card.y1 - HULL_TOP, x2: card.x2 + HULL_PAD, y2: card.y2 + HULL_PAD });
         g.n++;

@@ -96,6 +96,8 @@ export interface StyleSettings {
   colorBy?: ColorBy;
   /** What connections show as text. Default: their label. */
   edgeLabel?: EdgeLabel;
+  /** What groups nodes into areas: 'type', 'tag' or 'data.<key>'. Default: 'type'. */
+  groupBy?: string;
   /** Zoomed far out, nodes turn into plain blocks without text. Default: true. */
   simplifyZoomedOut?: boolean;
   nodeTypes?: Record<string, NodeStyle>;
