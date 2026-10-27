@@ -35,7 +35,8 @@ function clean(value: unknown, key?: string): unknown {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       if (v === undefined || v === null) continue;
-      if (Array.isArray(v) && v.length === 0 && k !== 'nodes' && k !== 'edges') continue;
+      // An empty `links` means "no property links", unlike a missing one.
+      if (Array.isArray(v) && v.length === 0 && k !== 'nodes' && k !== 'edges' && k !== 'links') continue;
       const c = clean(v, k);
       if (c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === 0) continue;
       out[k] = c;

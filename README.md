@@ -88,6 +88,11 @@ A `*.brainview` file shows the **Markdown notes of your workspace** as a graph, 
 - **Connection** = a link: `[[note]]`, `![[note]]` or `[text](note.md)` in the text (no type),
   a `[[note]]` in a property (the property name is the type, e.g. `depends-on: "[[api]]"`),
   or a row of Bases' link database (with its type).
+- **Pick which properties link** (*Style* → *Links from properties*): by default every property with a `[[link]]`
+  connects. Uncheck *Every property with [[links]]* and check the ones you want: only those connect, and plain
+  names count too (`depends-on: api`, `owners: [ann, bob]` finds `ann.md`). A list of objects links by each
+  object's `target` (or `link`, `note`, `path`, `id`, `key`): `refers_to: [{ target: ID_1 }]`. A name finds a note by
+  its path, its file name or its `id` property. Saved as `source.links`.
 - **Read-only.** Double-click a note (or `Enter`) to open it beside the graph and change it there;
   the graph follows. Layout, style and slices work as in a `.brainmap` and are saved in the `.brainview`.
 - **Filter on any property, as in Bases:** in a slice, every frontmatter property shows up by its name
@@ -108,6 +113,7 @@ source:
   folders: [notes]          # only notes in these folders; leave out for all
   type: type                # property that gives the type (default: type)
   label: title              # property that gives the name (default: title, else the file name)
+  links: [depends-on, owners]  # only these properties connect, also with plain names; leave out for every [[link]]
 settings:                   # as in a .brainmap: layout, style, slices
   slices:
     - name: Open work

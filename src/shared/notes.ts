@@ -27,6 +27,11 @@ export interface NoteSource {
   type?: string;
   /** The property that gives the name. Default: title, else the file name. */
   label?: string;
+  /**
+   * The properties whose values become connections. Their values may be [[links]] or plain
+   * names (`depends-on: api`). Left out: every property that holds a [[link]]. Empty: none.
+   */
+  links?: string[];
 }
 
 export interface BrainView {
@@ -45,6 +50,7 @@ export function readView(raw: unknown): BrainView {
   if (folders.length) source.folders = folders;
   if (typeof src.type === 'string' && src.type) source.type = src.type;
   if (typeof src.label === 'string' && src.label) source.label = src.label;
+  if (src.links !== undefined && src.links !== null) source.links = [...new Set(list(src.links).map((l) => l.trim()).filter(Boolean))];
   const map = normalize({ title: obj.title, settings: obj.settings });
   return { title: typeof obj.title === 'string' ? obj.title : undefined, source, settings: map.settings };
 }
@@ -57,19 +63,29 @@ export function emptyView(): BrainView {
 const isNote = (f: NoteFile, folders: string[] | undefined) =>
   f.kind === 'markdown' && (!folders?.length || folders.some((d) => f.path.startsWith(`${d}/`)));
 
-/** Finds the note a [[link]] in a property names: by path, then by name when only one note has it. */
+/**
+ * Finds the note a link in a property names: by path, then by name, then by its `id`
+ * property; a name or id only counts when one note has it.
+ */
 function makeResolver(files: NoteFile[]): (raw: string) => string | undefined {
   const paths = new Set(files.map((f) => f.path));
-  const byName = new Map<string, string | null>();
-  for (const f of files) {
-    const name = f.basename.toLowerCase();
-    byName.set(name, byName.has(name) ? null : f.path);
-  }
+  const unique = (key: (f: NoteFile) => unknown) => {
+    const map = new Map<string, string | null>();
+    for (const f of files) {
+      const k = key(f);
+      if (typeof k !== 'string' && typeof k !== 'number') continue;
+      const name = String(k).trim().toLowerCase();
+      if (name) map.set(name, map.has(name) ? null : f.path);
+    }
+    return map;
+  };
+  const byName = unique((f) => f.basename);
+  const byId = unique((f) => f.properties?.id);
   return (raw) => {
     const v = raw.replace(/\\/g, '/').replace(/^\.?\//, '').trim();
     if (paths.has(v)) return v;
     if (paths.has(`${v}.md`)) return `${v}.md`;
-    return byName.get(v.split('/').pop()!.replace(/\.md$/i, '').toLowerCase()) ?? undefined;
+    return byName.get(v.split('/').pop()!.replace(/\.md$/i, '').toLowerCase()) ?? byId.get(v.toLowerCase()) ?? undefined;
   };
 }
 
@@ -82,6 +98,38 @@ function propertyLinks(value: unknown): string[] {
     for (const m of t.matchAll(/\[\[([^\]|#\n]+)[^\]\n]*\]\]/g)) out.push(m[1].trim());
   }
   return out;
+}
+
+/** The fields of an object in a link property that name the note, the first one found wins. */
+const TARGET_KEYS = ['target', 'link', 'note', 'path', 'id', 'key'];
+
+/**
+ * The names a property chosen as links names: [[links]], else each plain text.
+ * An object names its `target` (or link, note, path, id, key): `refers_to: [{ target: api }]`.
+ */
+function chosenLinks(value: unknown): string[] {
+  const items = (Array.isArray(value) ? value : [value]).map((t) => {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return t;
+    const obj = t as Record<string, unknown>;
+    return TARGET_KEYS.map((k) => obj[k]).find((x) => typeof x === 'string' || typeof x === 'number');
+  });
+  return items.flatMap((t) => {
+    if (typeof t !== 'string' && typeof t !== 'number') return [];
+    const links = propertyLinks(String(t));
+    return links.length ? links : [String(t).trim()].filter(Boolean);
+  });
+}
+
+/** The properties a view can pick as links: every property of its notes but type, tags and description. */
+export function linkCandidates(files: NoteFile[], view: BrainView): string[] {
+  const used = new Set([view.source.type ?? 'type', 'tags', 'tag', 'description']);
+  const names = new Set<string>();
+  for (const f of files) {
+    if (!isNote(f, view.source.folders)) continue;
+    for (const k of Object.keys(f.properties ?? {})) if (!used.has(k)) names.add(k);
+  }
+  for (const k of view.source.links ?? []) names.add(k);
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
 /** A property value as a filter can compare it: text, number or a list of texts. */
@@ -97,6 +145,7 @@ function plain(value: unknown): unknown {
  * The graph of a view: one node per note (its path is its id), one connection per
  * link between two shown notes. A [[link]] in a property is a connection of that
  * property's name, e.g. `depends-on: [[api]]`; a link in the text has no type.
+ * With `source.links` only the properties listed there connect, and plain names count too.
  */
 export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   const notes = files.filter((f) => isNote(f, view.source.folders));
@@ -106,6 +155,7 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
   const labelKey = view.source.label ?? 'title';
   // These are the node's own type, tags and description; every other property is data to filter on.
   const used = new Set([typeKey, 'tags', 'tag', 'description']);
+  const chosen = view.source.links && new Set(view.source.links);
 
   const nodes: BrainNode[] = [];
   const edges: BrainEdge[] = [];
@@ -130,7 +180,7 @@ export function notesToMap(files: NoteFile[], view: BrainView): BrainMap {
     const data: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(p)) {
       if (used.has(k)) continue;
-      const links = propertyLinks(v);
+      const links = !chosen ? propertyLinks(v) : chosen.has(k) ? chosenLinks(v) : [];
       for (const l of links) connect(f.path, resolve(l), k);
       // A link filters by the name it names: `depends-on has api`.
       data[k] = links.length ? links : plain(v) ?? '';

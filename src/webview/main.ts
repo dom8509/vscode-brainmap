@@ -23,7 +23,7 @@ import {
 } from '../shared/model';
 import { FilterNode, countConditions, describeFilter, prune } from '../shared/filter';
 import { filterEditor } from './filterEditor';
-import { BarSettings, HostMessage, WebviewMessage } from '../shared/messages';
+import { BarSettings, HostMessage, LinkSettings, WebviewMessage } from '../shared/messages';
 import { GraphView } from './graph';
 import { CardLayer, LARGE_GRAPH, rgba } from './cards';
 import { checklist, datalist, field, h, select, splitList } from './dom';
@@ -149,6 +149,8 @@ class App {
   private notes = '';
   /** From the host, for a .brainview: the global filter editor's choices over every note. */
   private options?: FilterOptions;
+  /** From the host, for a .brainview: which properties become connections. */
+  private links?: LinkSettings;
   /** The global filter being edited, applied only on Apply. */
   editingFilter?: FilterNode;
   /** The user chose to see every note of a large view, without a slice. */
@@ -257,6 +259,7 @@ class App {
     this.format = msg.format;
     this.fileName = msg.fileName;
     this.options = msg.options;
+    this.links = msg.links;
     if (this.readOnly !== !!msg.readOnly) {
       this.readOnly = !!msg.readOnly;
       this.renderEmpty();
@@ -1638,10 +1641,33 @@ class App {
         h('input', { type: 'checkbox', checked: style.simplifyZoomedOut ?? true,
           onchange: (e: Event) => { style.simplifyZoomedOut = (e.target as HTMLInputElement).checked; this.commit({ panel: false }); } }),
         'Hide text on nodes when zoomed far out'),
+      this.readOnly && this.linksPanel(),
       h('h4', {}, 'Node types'), nodeRows.length ? nodeRows : h('p', { class: 'muted' }, 'No node types yet. Set a type in the inspector.'),
       h('h4', {}, 'Tags'), tagRows.length ? tagRows : h('p', { class: 'muted' }, 'No tags yet.'),
       h('h4', {}, 'Dependency (edge) types'),
       edgeRows.length ? [h('p', { class: 'muted small' }, 'color · line · length (proximity in force layouts)'), ...edgeRows] : h('p', { class: 'muted' }, 'No edge types yet.'),
+    );
+  }
+
+  /** A .brainview: which properties of the notes become connections. Saved as `source.links`. */
+  private linksPanel(): HTMLElement | false {
+    const links = this.links;
+    if (!links) return false;
+    const auto = !links.chosen;
+    const set = (chosen?: string[]) => {
+      links.chosen = chosen;
+      this.renderSettings();
+      post({ type: 'setLinks', links: chosen });
+    };
+    // Switching away from automatic starts with the properties that link now.
+    const linkingNow = () => uniqueTypes(this.map).edgeTypes.filter((t) => links.properties.includes(t));
+    return h('div', {},
+      h('h4', {}, 'Links from properties'),
+      h('p', { class: 'muted small' }, 'Checked properties become connections, named after the property. Their values may be [[links]] or plain note names.'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: auto, onchange: (e: Event) => set((e.target as HTMLInputElement).checked ? undefined : linkingNow()) }),
+        'Every property with [[links]]'),
+      !auto && checklist(links.properties, links.chosen, (v) => set(v)),
     );
   }
 

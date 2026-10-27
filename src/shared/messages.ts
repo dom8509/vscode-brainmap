@@ -10,6 +10,8 @@ export type HostMessage =
       readOnly?: boolean;
       /** For a map the host filtered already: what the global filter editor offers over every node. */
       options?: FilterOptions;
+      /** A .brainview: which properties become connections, and which it could pick. */
+      links?: LinkSettings;
     }
   | { type: 'error'; message: string }
   | { type: 'ui'; bars: BarSettings };
@@ -20,6 +22,14 @@ export interface BarSettings {
   hints: boolean;
 }
 
+/** Which properties of a .brainview's notes become connections. */
+export interface LinkSettings {
+  /** The chosen properties; undefined: every property that holds a [[link]]. */
+  chosen?: string[];
+  /** Every property the notes have that could be picked. */
+  properties: string[];
+}
+
 /** Messages sent from the webview to the extension host. */
 export type WebviewMessage =
   | { type: 'ready' }
@@ -27,4 +37,6 @@ export type WebviewMessage =
   | { type: 'notify'; level: 'info' | 'error'; message: string }
   /** Open the note behind a node of a .brainview. */
   | { type: 'open'; id: string }
+  /** Pick the properties of a .brainview that become connections; undefined: every one with a [[link]]. */
+  | { type: 'setLinks'; links?: string[] }
   | { type: 'setBar'; bar: keyof BarSettings; show: boolean };
