@@ -210,9 +210,94 @@ export function filterEditor(
   // A property the list does not offer (a data key no node has any more) stays pickable.
   const withCurrent = (list: FilterProperty[], id: string) => (list.some((p) => p.id === id) ? list : [...list, propOf(id) ?? { id, label: id, kind: 'text' as const }]);
 
+  // ---- moving filters and groups by dragging their grip ⋮⋮, within a group or into another one.
+  let dragged: FilterNode | undefined;
+  let marked: HTMLElement | undefined;
+  /** The list that holds `node`, anywhere under `g`. */
+  const listOf = (node: FilterNode, g: FilterGroup = root): FilterNode[] | undefined => {
+    const list = childrenOf(g);
+    if (list.includes(node)) return list;
+    for (const c of list) if (isGroup(c)) { const found = listOf(node, c); if (found) return found; }
+    return undefined;
+  };
+  const inside = (g: FilterGroup, node: FilterNode): boolean => childrenOf(g).some((c) => c === node || (isGroup(c) && inside(c, node)));
+  /** How many group levels lie below a group. */
+  const levels = (g: FilterGroup): number => Math.max(0, ...childrenOf(g).filter(isGroup).map((c) => 1 + levels(c)));
+  // A group never goes into itself, and groups nest at most two deep (as "+ Add group" allows).
+  const canDrop = (target: FilterGroup, depth: number) =>
+    !!dragged && dragged !== target && !(isGroup(dragged) && (inside(dragged, target) || depth + 1 + levels(dragged) > 2));
+  const mark = (el?: HTMLElement, cls?: string) => {
+    marked?.classList.remove('drop-before', 'drop-after', 'drop-into');
+    marked = el;
+    if (el && cls) el.classList.add(cls);
+  };
+  const move = (target: FilterGroup, depth: number, index: number) => {
+    const node = dragged;
+    const from = node && listOf(node);
+    if (!node || !from || !canDrop(target, depth)) return;
+    const to = childrenOf(target);
+    const at = from.indexOf(node);
+    from.splice(at, 1);
+    to.splice(from === to && at < index ? index - 1 : index, 0, node);
+    rerender();
+  };
+  /** The grip that drags `node`; `box` is what moves with the pointer. */
+  const grip = (node: FilterNode, box: () => HTMLElement) =>
+    h('span', { class: 'filter-grip', draggable: 'true', title: 'Drag to move', 'aria-hidden': 'true',
+      ondragstart: (e: DragEvent) => {
+        dragged = node;
+        e.dataTransfer?.setData('text/plain', '');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer?.setDragImage(box(), 12, 12);
+        e.stopPropagation();
+        requestAnimationFrame(() => box().classList.add('dragging'));
+      },
+      ondragend: () => {
+        box().classList.remove('dragging');
+        dragged = undefined;
+        mark();
+      } }, '⋮⋮');
+  /** Dropping on an item puts the dragged one before or after it, by which half the pointer is in. */
+  const dropTarget = (el: HTMLElement, g: FilterGroup, depth: number, index: number) => {
+    const half = (e: DragEvent) => {
+      const r = el.getBoundingClientRect();
+      return e.clientY < r.top + r.height / 2 ? 0 : 1;
+    };
+    el.addEventListener('dragover', (e) => {
+      if (!canDrop(g, depth)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      mark(el, half(e) ? 'drop-after' : 'drop-before');
+    });
+    el.addEventListener('dragleave', (e) => { if (marked === el && !el.contains(e.relatedTarget as Node)) mark(); });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      move(g, depth, index + half(e));
+    });
+    return el;
+  };
+  /** Dropping on a group's "+ Add" line puts the dragged one at the end of that group. */
+  const dropEnd = (el: HTMLElement, g: FilterGroup, depth: number) => {
+    el.addEventListener('dragover', (e) => {
+      if (!canDrop(g, depth)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      mark(el, 'drop-into');
+    });
+    el.addEventListener('dragleave', (e) => { if (marked === el && !el.contains(e.relatedTarget as Node)) mark(); });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      move(g, depth, childrenOf(g).length);
+    });
+    return el;
+  };
+
   const condition = (c: FilterCondition, remove: () => void) => {
     const prop = propOf(c.property);
-    return h('div', { class: 'filter-row' },
+    const row: HTMLElement = h('div', { class: 'filter-row' },
+      grip(c, () => row),
       propertySelect(c, (v) => {
         c.property = v;
         const next = propOf(v);
@@ -228,22 +313,24 @@ export function filterEditor(
       valueControl(c),
       h('button', { class: 'filter-x', title: 'Remove filter', 'aria-label': 'Remove filter', onclick: remove }, '×'),
     );
+    return row;
   };
 
   const group = (g: FilterGroup, depth: number, remove?: () => void): HTMLElement => {
     const children = childrenOf(g);
     const removeChild = (i: number) => () => { children.splice(i, 1); rerender(); };
     const first = propertiesFor(scope)[0];
-    return h('div', { class: depth ? 'filter-group nested' : 'filter-group' },
+    const box: HTMLElement = h('div', { class: depth ? 'filter-group nested' : 'filter-group' },
       h('div', { class: 'filter-head' },
+        depth > 0 && grip(g, () => box),
         select(CONJUNCTIONS.map((c) => ({ value: c.conj, label: c.label })), conjunctionOf(g), (v) => {
           setConj(g, v as Conjunction);
           rerender();
         }, { class: 'filter-conj', title: 'How the filters combine' }),
         remove && h('button', { class: 'filter-x', title: 'Remove group', 'aria-label': 'Remove group', onclick: remove }, '×'),
       ),
-      children.map((c, i) => (isGroup(c) ? group(c, depth + 1, removeChild(i)) : condition(c, removeChild(i)))),
-      h('div', { class: 'filter-add' },
+      children.map((c, i) => dropTarget(isGroup(c) ? group(c, depth + 1, removeChild(i)) : condition(c, removeChild(i)), g, depth, i)),
+      dropEnd(h('div', { class: 'filter-add' },
         h('button', { class: 'link', onclick: () => {
           children.push({ property: first.id, op: operatorsFor(first)[0].op });
           rerender();
@@ -252,8 +339,9 @@ export function filterEditor(
           children.push(makeGroup('or', [{ property: first.id, op: operatorsFor(first)[0].op }]));
           rerender();
         } }, '+ Add group'),
-      ),
+      ), g, depth),
     );
+    return box;
   };
 
   el.append(group(root, 0));
