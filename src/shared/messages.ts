@@ -35,8 +35,8 @@ export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'edit'; map: BrainMap }
   | { type: 'notify'; level: 'info' | 'error'; message: string }
-  /** Open the note behind a node of a .brainview. */
-  | { type: 'open'; id: string }
+  /** Open the note behind a node of a .brainview, or the one a [[link]] names (also one the view does not show). */
+  | { type: 'open'; id: string; link?: string }
   /** Pick the properties of a .brainview that become connections; undefined: every one with a [[link]]. */
   | { type: 'setLinks'; links?: string[] }
   | { type: 'setBar'; bar: keyof BarSettings; show: boolean };

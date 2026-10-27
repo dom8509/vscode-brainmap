@@ -100,6 +100,8 @@ export interface StyleSettings {
   groupBy?: string;
   /** Zoomed far out, nodes turn into plain blocks without text. Default: true. */
   simplifyZoomedOut?: boolean;
+  /** Properties (keys of a node's data) whose values show on the card, under the name. */
+  cardProperties?: string[];
   nodeTypes?: Record<string, NodeStyle>;
   edgeTypes?: Record<string, EdgeStyle>;
   tags?: Record<string, NodeStyle>;
@@ -383,6 +385,52 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
     const kind = set.size === 1 ? ([...set][0] as FilterProperty['kind']) : set.has('list') ? 'list' : 'text';
     return { id: `data.${k}`, label: k, kind };
   });
+}
+
+/** One value on a card; with a target it is a link to that node, with a link a [[link]] to a note by name. */
+export interface CardValue {
+  text: string;
+  target?: string;
+  link?: string;
+}
+
+/** The names a link can give a node: its id (a path), the file name, its `id` property, its name. */
+function nodeNames(n: BrainNode): string[] {
+  const file = n.id.split('/').pop()!.replace(/\.md$/i, '');
+  return [n.id, n.id.replace(/\.md$/i, ''), file, n.data?.['file.name'], n.data?.id, n.label]
+    .filter((x) => typeof x === 'string' || typeof x === 'number')
+    .map((x) => String(x).trim().toLowerCase());
+}
+
+/**
+ * The values of the chosen properties as the card shows them, one list per property;
+ * empty ones are left out. `linked(key)` gives the nodes the node connects to by that
+ * property: a value naming one of them becomes a link to it.
+ */
+export function cardProperties(node: BrainNode, keys: string[] | undefined, linked: (key: string) => BrainNode[] = () => []): CardValue[][] {
+  const text = (v: unknown) => (v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).trim();
+  return (keys ?? [])
+    .map((k) => {
+      const v = node.data?.[k];
+      const targets = linked(k);
+      const find = (name: string) => targets.find((n) => nodeNames(n).includes(name.toLowerCase()))?.id;
+      return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).flatMap((t): CardValue[] => {
+        // "[[api]]" or "[[lib/api|The API]]" shows its name (or alias) and stays a link.
+        const links = [...t.matchAll(/\[\[([^\]|#\n]+)[^\]|\n]*(?:\|([^\]\n]+))?\]\]/g)];
+        if (!links.length) {
+          const target = find(t);
+          return [target ? { text: t, target } : { text: t }];
+        }
+        return links.map((m) => {
+          const name = m[1].trim();
+          const value: CardValue = { text: (m[2] ?? name.split('/').pop()!).trim(), link: name };
+          const target = find(name) ?? find(name.split('/').pop()!.replace(/\.md$/i, ''));
+          if (target) value.target = target;
+          return value;
+        });
+      });
+    })
+    .filter((values) => values.length > 0);
 }
 
 export function edgeValues(e: BrainEdge): FilterValues {

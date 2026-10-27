@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { BasesApi, bases } from './bases';
 import { detectFormat, parse, parseView, serialize, serializeView } from './shared/format';
-import { linkCandidates, notesToMap } from './shared/notes';
+import { linkCandidates, notesToMap, resolveNote } from './shared/notes';
 import { FileFormat, applyGlobalFilter, emptyMap, filterOptions } from './shared/model';
 import { HostMessage, WebviewMessage } from './shared/messages';
 
@@ -203,7 +203,11 @@ class NotesViewProvider implements vscode.CustomTextEditorProvider {
           break;
         }
         case 'open': {
-          const uri = uris.get(msg.id);
+          let uri = uris.get(msg.id);
+          if (!uri && msg.link && api) {
+            const path = resolveNote(api.files(), msg.link);
+            uri = path && uris.get(path);
+          }
           if (uri) await vscode.window.showTextDocument(vscode.Uri.parse(uri), { viewColumn: vscode.ViewColumn.Beside, preview: true });
           break;
         }

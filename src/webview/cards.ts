@@ -1,4 +1,5 @@
 import type { Core, NodeSingular } from 'cytoscape';
+import type { CardValue } from '../shared/model';
 import { h } from './dom';
 import { HullPart, Rect, hullParts } from './hulls';
 
@@ -79,6 +80,8 @@ export class CardLayer {
   groups = true;
   /** Zoomed far out, cards turn into plain blocks without text. */
   simplify = true;
+  /** A link on a card was clicked. */
+  onLink?: (value: CardValue) => void;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
     this.hullSvg.setAttribute('class', 'hull-svg');
@@ -157,7 +160,7 @@ export class CardLayer {
   private updateContent(card: Card, n: NodeSingular) {
     const d = n.data();
     // Tags stay off the card to keep it calm; the hover card and details show them.
-    const sig = [d.label, d.type, d.typeName, d.color, d.width].join('|');
+    const sig = [d.label, d.type, d.typeName, JSON.stringify(d.props), d.color, d.width].join('|');
     if (sig === card.sig || this.editing === n.id()) return;
     card.sig = sig;
     const color: string = d.color;
@@ -172,9 +175,36 @@ export class CardLayer {
       tile,
       h('span', { class: 'card-text' },
         card.label,
-        d.typeName && h('span', { class: 'card-meta' }, h('span', { class: 'card-type' }, d.typeName)),
+        (d.typeName || d.props?.length > 0) && h('span', { class: 'card-meta' },
+          d.typeName && h('span', { class: 'card-type' }, d.typeName),
+          d.props?.length > 0 && this.props(d.props, !!d.typeName),
+        ),
       ),
     );
+  }
+
+  /** The chosen properties: values with " · " between properties, ", " within a list; links can be clicked. */
+  private props(props: CardValue[][], afterType: boolean): HTMLElement {
+    const parts: (string | HTMLElement)[] = afterType ? ['· '] : [];
+    props.forEach((values, i) => {
+      if (i) parts.push(' · ');
+      values.forEach((v, j) => {
+        if (j) parts.push(', ');
+        if (!v.target && !v.link) return parts.push(v.text);
+        parts.push(h('a', {
+          class: 'card-link',
+          href: '#',
+          title: 'Open',
+          onmousedown: (e: Event) => e.stopPropagation(),
+          onclick: (e: MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.onLink?.(v);
+          },
+        }, v.text));
+      });
+    });
+    return h('span', { class: 'card-props' }, ...parts);
   }
 
   /** Turns the card's name into a text field. `done` gets the text and the key that ended editing. */

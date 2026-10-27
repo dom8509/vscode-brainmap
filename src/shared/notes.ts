@@ -89,6 +89,11 @@ function makeResolver(files: NoteFile[]): (raw: string) => string | undefined {
   };
 }
 
+/** The path of the note a [[link]] names, among every note of the workspace. */
+export function resolveNote(files: NoteFile[], link: string): string | undefined {
+  return makeResolver(files.filter((f) => f.kind === 'markdown'))(link);
+}
+
 /** The [[links]] in a property value: "[[a]]" or a list of them. */
 function propertyLinks(value: unknown): string[] {
   const texts = Array.isArray(value) ? value : [value];

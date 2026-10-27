@@ -4,12 +4,14 @@ import fcose from 'cytoscape-fcose';
 import dagre from 'cytoscape-dagre';
 import {
   BrainMap,
+  BrainNode,
   DEFAULT_LAYOUT,
   LayoutSettings,
   Position,
   computeSlice,
   autoColor,
   resolveEdgeStyle,
+  cardProperties,
   resolveNodeStyle,
 } from '../shared/model';
 import { CARD_HEIGHT, LARGE_GRAPH } from './cards';
@@ -270,6 +272,15 @@ export class GraphView {
       const center = this.viewportCenter();
       const toAdd: ElementDefinition[] = [];
       const groupBy = map.settings.style?.groupBy ?? 'type';
+      // For links on the cards: the nodes each node connects to, by connection type.
+      const byId = new Map(map.nodes.map((n) => [n.id, n]));
+      const linked = new Map<string, BrainNode[]>();
+      for (const e of map.edges) {
+        const t = byId.get(e.target);
+        if (!t || !e.type) continue;
+        const key = `${e.source}\n${e.type}`;
+        linked.set(key, [...(linked.get(key) ?? []), t]);
+      }
       for (const n of map.nodes) {
         const st = resolveNodeStyle(map, n);
         const label = n.label || n.id;
@@ -289,6 +300,7 @@ export class GraphView {
           groupColor,
           groupName: group ? group.charAt(0).toUpperCase() + group.slice(1) : '',
           tags: n.tags ?? [],
+          props: cardProperties(n, map.settings.style?.cardProperties, (k) => linked.get(`${n.id}\n${k}`) ?? []),
           // Wide enough for the name, within limits so the graph stays tidy.
           width: Math.round(Math.max(170, Math.min(260, label.length * 7.4 + 96))),
         };
