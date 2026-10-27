@@ -264,9 +264,11 @@ export class CardLayer {
         hull.labels.push(anchor);
       }
       while (hull.labels.length > parts.length) hull.labels.pop()!.remove();
+      // Names grow and shrink with the cards; zoomed far out they keep a fixed, readable size.
+      const scale = this.simplify && zoom < LOD_ZOOM ? '' : ` scale(${zoom})`;
       parts.forEach((p, i) => {
         const anchor = hull!.labels[i];
-        anchor.style.transform = `translate(${p.anchor.x * zoom + pan.x}px, ${p.anchor.y * zoom + pan.y}px)`;
+        anchor.style.transform = `translate(${p.anchor.x * zoom + pan.x}px, ${p.anchor.y * zoom + pan.y}px)${scale}`;
         anchor.classList.toggle('outside', p.outside);
         const label = anchor.firstElementChild as HTMLElement;
         label.textContent = parts.length > 1 ? `${g.name} · ${p.size} of ${g.n}` : `${g.name} · ${g.n}`;

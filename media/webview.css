@@ -346,6 +346,7 @@ button:disabled {
   position: absolute;
   left: 0;
   top: 0;
+  transform-origin: 0 0;
 }
 .hull-label {
   position: absolute;
