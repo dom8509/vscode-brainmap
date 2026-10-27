@@ -81,7 +81,7 @@ export class CardLayer {
   /** Zoomed far out, cards turn into plain blocks without text. */
   simplify = true;
   /** A link on a card was clicked. */
-  onLink?: (id: string) => void;
+  onLink?: (value: CardValue) => void;
 
   constructor(private readonly cy: Core, canvas: HTMLElement, overlayParent: HTMLElement) {
     this.hullSvg.setAttribute('class', 'hull-svg');
@@ -190,8 +190,7 @@ export class CardLayer {
       if (i) parts.push(' · ');
       values.forEach((v, j) => {
         if (j) parts.push(', ');
-        if (!v.target) return parts.push(v.text);
-        const target = v.target;
+        if (!v.target && !v.link) return parts.push(v.text);
         parts.push(h('a', {
           class: 'card-link',
           href: '#',
@@ -200,7 +199,7 @@ export class CardLayer {
           onclick: (e: MouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
-            this.onLink?.(target);
+            this.onLink?.(v);
           },
         }, v.text));
       });

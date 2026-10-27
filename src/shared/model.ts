@@ -387,10 +387,11 @@ export function dataProperties(map: BrainMap): FilterProperty[] {
   });
 }
 
-/** One value on a card; with a target it is a link to that node. */
+/** One value on a card; with a target it is a link to that node, with a link a [[link]] to a note by name. */
 export interface CardValue {
   text: string;
   target?: string;
+  link?: string;
 }
 
 /** The names a link can give a node: its id (a path), the file name, its `id` property, its name. */
@@ -412,9 +413,21 @@ export function cardProperties(node: BrainNode, keys: string[] | undefined, link
     .map((k) => {
       const v = node.data?.[k];
       const targets = linked(k);
-      return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).map((t): CardValue => {
-        const target = targets.find((n) => nodeNames(n).includes(t.toLowerCase()));
-        return target ? { text: t, target: target.id } : { text: t };
+      const find = (name: string) => targets.find((n) => nodeNames(n).includes(name.toLowerCase()))?.id;
+      return (Array.isArray(v) ? v : [v]).map(text).filter(Boolean).flatMap((t): CardValue[] => {
+        // "[[api]]" or "[[lib/api|The API]]" shows its name (or alias) and stays a link.
+        const links = [...t.matchAll(/\[\[([^\]|#\n]+)[^\]|\n]*(?:\|([^\]\n]+))?\]\]/g)];
+        if (!links.length) {
+          const target = find(t);
+          return [target ? { text: t, target } : { text: t }];
+        }
+        return links.map((m) => {
+          const name = m[1].trim();
+          const value: CardValue = { text: (m[2] ?? name.split('/').pop()!).trim(), link: name };
+          const target = find(name) ?? find(name.split('/').pop()!.replace(/\.md$/i, ''));
+          if (target) value.target = target;
+          return value;
+        });
       });
     })
     .filter((values) => values.length > 0);

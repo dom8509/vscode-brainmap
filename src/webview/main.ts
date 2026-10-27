@@ -231,10 +231,11 @@ class App {
     this.cards = new CardLayer(this.graph.cy, canvas, this.stage);
     this.cards.groups = this.ui.groups ?? true;
     // A .brainview opens the linked note; a .brainmap has no notes and goes to the node.
-    this.cards.onLink = (id) => {
-      if (this.readOnly) return this.openNote(id);
-      this.graph.select([id]);
-      this.graph.showElements([id]);
+    this.cards.onLink = (v) => {
+      if (this.readOnly) return post({ type: 'open', id: v.target ?? '', link: v.link });
+      if (!v.target) return;
+      this.graph.select([v.target]);
+      this.graph.showElements([v.target]);
     };
     this.graph.groupLayout = this.cards.groups;
     this.renderEmpty();

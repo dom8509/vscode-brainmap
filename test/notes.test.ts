@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseView, serializeView } from '../src/shared/format';
 import { cardProperties, computeSlice, dataProperties } from '../src/shared/model';
-import { NoteFile, emptyView, linkCandidates, notesToMap, readView } from '../src/shared/notes';
+import { NoteFile, emptyView, linkCandidates, notesToMap, readView, resolveNote } from '../src/shared/notes';
 
 const note = (path: string, properties: Record<string, unknown> = {}, links: string[] = [], tags: string[] = []): NoteFile => {
   const name = path.split('/').pop()!;
@@ -146,4 +146,17 @@ test('a value naming a connected node is a link to it', () => {
     // The same name in a property that does not link stays text.
     [{ text: 'api' }],
   ]);
+});
+
+test('[[links]] show without brackets and stay links', () => {
+  // A property that does not link keeps its [[links]] as text in the data.
+  const view = readView({ source: { links: [] }, settings: { style: { cardProperties: ['related'] } } });
+  const map = notesToMap([note('a.md', { related: ['[[lib/api|The API]]', '[[gone]]', 'plain'] }), note('lib/api.md')], view);
+  const a = map.nodes.find((n) => n.id === 'a.md')!;
+  assert.deepEqual(cardProperties(a, ['related'], () => map.nodes), [[
+    { text: 'The API', link: 'lib/api', target: 'lib/api.md' },
+    { text: 'gone', link: 'gone' },
+    { text: 'plain' },
+  ]]);
+  assert.equal(resolveNote([note('a.md'), note('lib/api.md')], 'api'), 'lib/api.md');
 });
