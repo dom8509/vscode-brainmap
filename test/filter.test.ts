@@ -94,3 +94,12 @@ settings:
   assert.deepEqual(parse(serialize(m, 'yaml')), m);
   assert.equal(describeFilter(s.nodeFilter, 'node'), '(type is service or type is db) and tags has core');
 });
+
+test('expand: matches plus the nodes connected to them, matches marked', () => {
+  const critical = { property: 'tags', op: 'has', value: 'critical' } as const;
+  assert.deepEqual(nodes({ name: 's', nodeFilter: critical, expand: true }), ['api', 'auth', 'db', 'web']);
+  assert.deepEqual(nodes({ name: 's', nodeFilter: critical, expand: true, depth: 1 }), ['api', 'web']);
+  assert.deepEqual(nodes({ name: 's', nodeFilter: { property: 'type', op: 'is', value: 'database' }, expand: true, direction: 'upstream', depth: 1 }), ['api', 'auth', 'db']);
+  assert.deepEqual([...computeSlice(map, { name: 's', nodeFilter: critical, expand: true }).matches], ['web']);
+  assert.equal(computeSlice(map, { name: 's' }).matches.size, 0);
+});

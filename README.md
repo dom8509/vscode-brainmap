@@ -114,6 +114,11 @@ settings:
       edgeFilter: { property: type, op: is, value: depends-on }
       direction: downstream    # downstream | upstream | both
       depth: 2
+    - name: Critical and what it uses
+      nodeFilter: { property: tags, op: has, value: critical }
+      expand: true             # also show nodes connected to the matches (direction, depth)
+      highlight: true          # mark the nodes that match the filter
+      direction: downstream
     # Older files with nodeTypes / tags / edgeTypes still work: they are read as filters.
   activeSlice: Backend
   sliceMode: hide              # hide | dim

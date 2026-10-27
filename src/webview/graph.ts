@@ -329,10 +329,11 @@ export class GraphView {
 
   applySlice(map: BrainMap) {
     const cy = this.cy;
-    cy.elements().removeClass('hidden dimmed');
+    cy.elements().removeClass('hidden dimmed slice-hit');
     const slice = map.settings.slices?.find((s) => s.name === map.settings.activeSlice);
     if (!slice) return;
     const res = computeSlice(map, slice);
+    if (slice.highlight) res.matches.forEach((id) => cy.getElementById(id).addClass('slice-hit'));
     const cls = map.settings.sliceMode === 'dim' ? 'dimmed' : 'hidden';
     cy.nodes().forEach((n) => {
       if (!res.nodes.has(n.id())) n.addClass(cls);

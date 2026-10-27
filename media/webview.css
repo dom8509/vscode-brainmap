@@ -404,6 +404,10 @@ button:disabled {
   border-color: #ffd166;
   box-shadow: 0 0 0 4px rgba(255, 209, 102, 0.25);
 }
+.card.slice-hit {
+  outline: 3px solid var(--bm-accent);
+  outline-offset: 3px;
+}
 .card.drop {
   border: 2px dashed var(--bm-accent);
   background: color-mix(in srgb, var(--bm-accent) 8%, var(--bm-surface));

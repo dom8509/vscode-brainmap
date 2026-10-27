@@ -125,6 +125,7 @@ export class CardLayer {
       cls.toggle('dim', n.hasClass('fdim'));
       cls.toggle('slice-dim', n.hasClass('dimmed'));
       cls.toggle('hit', n.hasClass('search-hit'));
+      cls.toggle('slice-hit', n.hasClass('slice-hit'));
       cls.toggle('hover', n.hasClass('hover'));
       cls.toggle('drop', n.hasClass('drop-target'));
     });

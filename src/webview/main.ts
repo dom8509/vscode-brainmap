@@ -1548,7 +1548,13 @@ class App {
         s.direction ?? 'downstream', (v) => { s.direction = v as any; updateCount(); })),
       field('Max depth (empty = unlimited)', h('input', { type: 'number', min: 0, value: s.depth ?? '',
         onchange: (e: Event) => { const v = (e.target as HTMLInputElement).value; s.depth = v === '' ? undefined : Number(v); updateCount(); } })),
-      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown.'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: !!s.expand, onchange: (e: Event) => { s.expand = (e.target as HTMLInputElement).checked || undefined; updateCount(); } }),
+        'Also show nodes connected to the matching nodes'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: !!s.highlight, onchange: (e: Event) => { s.highlight = (e.target as HTMLInputElement).checked || undefined; } }),
+        'Highlight the matching nodes'),
+      h('p', { class: 'muted small' }, 'A filter without its value does not filter yet. With start nodes, only nodes reachable over the kept connections are shown. "Also show connected nodes" starts at the matching nodes and follows the kept connections, in the direction and up to the depth above.'),
       count,
       h('div', { class: 'row' },
         h('button', { class: 'primary', onclick: save }, 'Save & show'),
@@ -1565,6 +1571,7 @@ function describeSlice(s: Slice): string {
   if (nodes) parts.push(nodes);
   if (edges) parts.push(`connections: ${edges}`);
   if (s.roots?.length) parts.push(`from ${s.roots.join(', ')} ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
+  if (s.expand) parts.push(`+ connected ${s.direction ?? 'downstream'}${s.depth !== undefined ? ` ≤${s.depth}` : ''}`);
   return parts.join(' · ') || 'everything';
 }
 
