@@ -4,6 +4,7 @@
   "description": "Create and edit graphs visually in .brainmap files (JSON or YAML) with animated layouts, styling by type/tag and graph slices, and graphs of your Markdown notes in .brainview files.",
   "version": "0.1.0",
   "publisher": "dom8509",
+  "icon": "media/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
